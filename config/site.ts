@@ -1,8 +1,9 @@
 export type SiteConfig = typeof siteConfig;
 
 export const siteConfig = {
-  name: "Next.js + HeroUI",
-  description: "Make beautiful websites regardless of your design experience.",
+  name: "EnergyGrid",
+  description:
+    "Comprehensive energy monitoring, compliance tracking, and analytics solution designed specifically for Philippine buildings and facilities. Achieve regulatory compliance while optimizing energy efficiency and reducing costs.",
   navItems: [
     {
       label: "Home",
