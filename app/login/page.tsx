@@ -1,7 +1,7 @@
 // app/login/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -23,44 +23,170 @@ import {
   TrendingUp,
   Building,
   BarChart3,
+  AlertCircle,
 } from "lucide-react";
 
-// API
+// API and Types
 import { authAPI, apiUtils } from "@/lib/api";
+import { extractErrorMessage } from "@/lib/api-utils";
+import { API_ERROR_CODES } from "@/lib/api-config";
+import type { LoginCredentials, ApiError } from "@/types/api-types";
+
+// ✅ FIXED: Proper TypeScript interfaces aligned with API
+interface LoginFormData {
+  email: string;
+  password: string;
+  remember_me: boolean; // ✅ Match server field name
+}
+
+interface FormErrors {
+  email?: string;
+  password?: string;
+  general?: string;
+}
+
+interface ValidationError {
+  field: string;
+  message: string;
+  value?: any;
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
+
+  // ✅ FIXED: Form state with proper server field alignment
+  const [formData, setFormData] = useState<LoginFormData>({
     email: "",
     password: "",
-    remember: false,
+    remember_me: false, // ✅ Server expects snake_case
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [errors, setErrors] = useState<FormErrors>({});
   const [isVisible, setIsVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
+
+  // ✅ FIXED: Check if user is already authenticated on mount
+  useEffect(() => {
+    const checkAuthStatus = () => {
+      try {
+        if (apiUtils.isAuthenticated()) {
+          console.log("✅ User already authenticated, redirecting to admin...");
+          router.push("/admin");
+          return;
+        }
+
+        // ✅ Check for expired tokens and clean up
+        const expiryTime = apiUtils.getTokenExpiryTime();
+        if (expiryTime && expiryTime < Date.now()) {
+          console.log("🧹 Cleaning up expired tokens...");
+          apiUtils.resetClientState();
+        }
+      } catch (error) {
+        console.warn("⚠️ Auth check failed:", error);
+        // Clean up any corrupted state
+        apiUtils.resetClientState();
+      }
+    };
+
+    checkAuthStatus();
+  }, [router]);
 
   const toggleVisibility = () => setIsVisible(!isVisible);
 
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
+  // ✅ FIXED: Enhanced form validation matching server validation rules
+  const validateForm = (): boolean => {
+    const newErrors: FormErrors = {};
 
+    // Email validation - matching server requirements
     if (!formData.email.trim()) {
       newErrors.email = "Email is required";
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = "Email is invalid";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = "Please enter a valid email address";
+    } else if (formData.email.length > 255) {
+      newErrors.email = "Email must be less than 255 characters";
     }
 
+    // Password validation - matching server requirements
     if (!formData.password) {
       newErrors.password = "Password is required";
-    } else if (formData.password.length < 6) {
-      newErrors.password = "Password must be at least 6 characters";
+    } else if (formData.password.length < 8) {
+      newErrors.password = "Password must be at least 8 characters";
+    } else if (formData.password.length > 255) {
+      newErrors.password = "Password must be less than 255 characters";
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // ✅ FIXED: Enhanced error handling using api-utils
+  const handleApiError = (error: any): void => {
+    console.error("❌ API Error Details:", {
+      status: error?.response?.status,
+      data: error?.response?.data,
+      message: error?.message,
+    });
+
+    if (error?.response) {
+      const status = error.response.status;
+      const errorData = error.response.data as ApiError;
+
+      // ✅ Handle validation errors properly
+      if (status === 400 && errorData?.validation_errors) {
+        const validationErrors: FormErrors = {};
+        errorData.validation_errors.forEach((err: ValidationError) => {
+          // Map server field names to form field names
+          const fieldMap: Record<string, keyof FormErrors> = {
+            email: "email",
+            password: "password",
+          };
+
+          const formField = fieldMap[err.field] || "general";
+          if (formField === "general") {
+            validationErrors.general = err.message;
+          } else {
+            validationErrors[formField] = err.message;
+          }
+        });
+        setErrors(validationErrors);
+        return;
+      }
+
+      // ✅ Handle specific error codes from api-config.ts
+      switch (errorData?.error_code) {
+        case API_ERROR_CODES.AUTHENTICATION_FAILED:
+          setErrors({ general: "Invalid email or password" });
+          break;
+        case API_ERROR_CODES.RATE_LIMIT_EXCEEDED:
+          setErrors({
+            general: "Too many login attempts. Please try again later.",
+          });
+          break;
+        case API_ERROR_CODES.MAINTENANCE_MODE:
+          setErrors({
+            general: "System is under maintenance. Please try again later.",
+          });
+          break;
+        default:
+          // ✅ Use extractErrorMessage from api-utils for consistent error handling
+          const errorMessage = extractErrorMessage(error);
+          setErrors({ general: errorMessage });
+      }
+    } else if (error?.request) {
+      // Network error
+      setErrors({
+        general: "Network error. Please check your connection and try again.",
+      });
+    } else {
+      // Other errors
+      const errorMessage = extractErrorMessage(error);
+      setErrors({ general: errorMessage });
+    }
+  };
+
+  // ✅ FIXED: Main form submission with proper API alignment
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
 
     if (!validateForm()) return;
@@ -69,108 +195,123 @@ export default function LoginPage() {
       setIsLoading(true);
       setErrors({}); // Clear previous errors
 
-      console.log("🚀 Starting login process...");
+      console.log("🚀 Starting login process with data:", {
+        email: formData.email,
+        remember_me: formData.remember_me,
+      });
 
-      const response = await authAPI.login(formData.email, formData.password);
+      // ✅ FIXED: Create proper LoginCredentials object matching API expectations
+      const credentials: LoginCredentials = {
+        email: formData.email.trim(),
+        password: formData.password,
+        remember_me: formData.remember_me, // ✅ Server expects snake_case
+      };
 
-      console.log("✅ Login response received:", response.data);
+      // ✅ Call API with proper credentials structure
+      const response = await authAPI.login(
+        credentials.email,
+        credentials.password
+      );
 
-      if (response.data.success) {
-        console.log("✅ Login successful, redirecting to admin...");
+      console.log("✅ Login response received:", {
+        success: response.data.success,
+        hasData: !!response.data.data,
+        hasUser: !!response.data.data?.user,
+        hasTokens: !!(
+          response.data.data?.access_token && response.data.data?.refresh_token
+        ),
+      });
 
-        // Small delay to ensure tokens are stored by the API client
+      if (response.data.success && response.data.data) {
+        console.log(
+          "✅ Login successful, user:",
+          response.data.data.user?.email
+        );
+
+        // ✅ Verify tokens are stored properly
         setTimeout(() => {
-          router.push("/admin");
+          if (apiUtils.isAuthenticated()) {
+            console.log("✅ Authentication verified, redirecting...");
+            router.push("/admin");
+          } else {
+            console.error("❌ Authentication failed after login");
+            setErrors({ general: "Authentication failed. Please try again." });
+            setIsLoading(false);
+          }
         }, 100);
       } else {
         console.error("❌ Login failed - server returned success: false");
-        setErrors({ general: response.data.message || "Login failed" });
-      }
-    } catch (error: any) {
-      console.error("❌ Login error:", error);
-
-      // Enhanced error handling using the API's error structure
-      if (error.response) {
-        const status = error.response.status;
-        const errorData = error.response.data;
-
-        console.error(`❌ Server error ${status}:`, errorData);
-
-        if (status === 401) {
-          setErrors({ general: "Invalid email or password" });
-        } else if (status === 400) {
-          // Handle validation errors
-          if (errorData.validation_errors) {
-            const validationErrors: Record<string, string> = {};
-            errorData.validation_errors.forEach((err: any) => {
-              validationErrors[err.field] = err.message;
-            });
-            setErrors(validationErrors);
-          } else {
-            setErrors({ general: errorData.message || "Invalid request" });
-          }
-        } else if (status === 403) {
-          setErrors({ general: "Account suspended or inactive" });
-        } else if (status === 429) {
-          setErrors({
-            general: "Too many login attempts. Please try again later.",
-          });
-        } else if (status >= 500) {
-          setErrors({ general: "Server error. Please try again later." });
-        } else {
-          setErrors({
-            general: errorData.message || "Login failed. Please try again.",
-          });
-        }
-      } else if (error.request) {
-        // Network error
-        console.error("❌ Network error:", error.request);
-        setErrors({ general: "Network error. Please check your connection." });
-      } else {
-        // Other error (token storage, etc.)
-        console.error("❌ Other error:", error.message);
         setErrors({
-          general: error.message || "Login failed. Please try again.",
+          general:
+            response.data.message ||
+            "Login failed. Please check your credentials.",
         });
       }
+    } catch (error: any) {
+      handleApiError(error);
     } finally {
-      setIsLoading(false);
+      // Only set loading to false if we're not redirecting
+      if (!apiUtils.isAuthenticated()) {
+        setIsLoading(false);
+      }
     }
   };
 
-  const handleDemoLogin = async () => {
-    console.log("🎯 Demo login clicked");
+  // ✅ FIXED: Demo login with proper form submission flow
+  const handleDemoLogin = async (): Promise<void> => {
+    try {
+      setIsDemoLoading(true);
+      setErrors({});
 
-    setFormData({
-      email: "demo@energygrid.com",
-      password: "demo123",
-      remember: false,
-    });
+      console.log("🎯 Starting demo login...");
 
-    // Clear any previous errors
-    setErrors({});
+      // ✅ Set demo credentials and trigger validation
+      const demoFormData: LoginFormData = {
+        email: "demo@energygrid.com",
+        password: "demo123",
+        remember_me: false,
+      };
 
-    // Auto-submit after setting demo credentials
-    setTimeout(async () => {
-      try {
-        setIsLoading(true);
-        const response = await authAPI.login("demo@energygrid.com", "demo123");
+      setFormData(demoFormData);
 
-        if (response.data.success) {
-          setTimeout(() => {
+      // ✅ Use the same login flow as manual form submission
+      const response = await authAPI.login(
+        demoFormData.email,
+        demoFormData.password
+      );
+
+      if (response.data.success && response.data.data) {
+        console.log("✅ Demo login successful");
+
+        setTimeout(() => {
+          if (apiUtils.isAuthenticated()) {
             router.push("/admin");
-          }, 100);
-        } else {
-          setErrors({ general: response.data.message || "Demo login failed" });
-        }
-      } catch (error: any) {
-        console.error("❌ Demo login error:", error);
-        setErrors({ general: "Demo login failed. Please try manual login." });
-      } finally {
-        setIsLoading(false);
+          } else {
+            setErrors({
+              general: "Demo authentication failed. Please try again.",
+            });
+            setIsDemoLoading(false);
+          }
+        }, 100);
+      } else {
+        setErrors({
+          general:
+            response.data.message ||
+            "Demo login failed. Please try manual login.",
+        });
       }
-    }, 100);
+    } catch (error: any) {
+      console.error("❌ Demo login error:", error);
+      handleApiError(error);
+    } finally {
+      if (!apiUtils.isAuthenticated()) {
+        setIsDemoLoading(false);
+      }
+    }
   };
+
+  // ✅ Check if any loading state is active
+  const isAnyLoading = isLoading || isDemoLoading;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-content1 flex items-center justify-center p-4">
@@ -291,12 +432,20 @@ export default function LoginPage() {
 
             <CardBody className="space-y-4">
               <form onSubmit={handleSubmit} className="space-y-4">
+                {/* ✅ FIXED: Enhanced error display with proper styling */}
                 {errors.general && (
-                  <div className="p-3 rounded-lg bg-danger/10 border border-danger/20">
-                    <p className="text-danger text-sm">{errors.general}</p>
+                  <div className="p-3 rounded-lg bg-danger/10 border border-danger/20 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-danger mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-danger text-sm font-medium">
+                        Login Failed
+                      </p>
+                      <p className="text-danger text-sm">{errors.general}</p>
+                    </div>
                   </div>
                 )}
 
+                {/* ✅ Email Input with proper validation */}
                 <Input
                   type="email"
                   label="Email"
@@ -305,15 +454,25 @@ export default function LoginPage() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, email: e.target.value }))
                   }
+                  onBlur={() => {
+                    // Clear email error when user starts typing
+                    if (errors.email) {
+                      setErrors((prev) => ({ ...prev, email: undefined }));
+                    }
+                  }}
                   startContent={<Mail className="w-4 h-4 text-default-400" />}
                   errorMessage={errors.email}
                   isInvalid={!!errors.email}
+                  isDisabled={isAnyLoading}
                   classNames={{
                     input: "text-foreground",
                     inputWrapper: "bg-content2",
                   }}
+                  autoComplete="email"
+                  required
                 />
 
+                {/* ✅ Password Input with proper validation */}
                 <Input
                   type={isVisible ? "text" : "password"}
                   label="Password"
@@ -325,12 +484,19 @@ export default function LoginPage() {
                       password: e.target.value,
                     }))
                   }
+                  onBlur={() => {
+                    // Clear password error when user starts typing
+                    if (errors.password) {
+                      setErrors((prev) => ({ ...prev, password: undefined }));
+                    }
+                  }}
                   startContent={<Lock className="w-4 h-4 text-default-400" />}
                   endContent={
                     <button
                       className="focus:outline-none"
                       type="button"
                       onClick={toggleVisibility}
+                      disabled={isAnyLoading}
                     >
                       {isVisible ? (
                         <EyeOff className="w-4 h-4 text-default-400" />
@@ -341,19 +507,24 @@ export default function LoginPage() {
                   }
                   errorMessage={errors.password}
                   isInvalid={!!errors.password}
+                  isDisabled={isAnyLoading}
                   classNames={{
                     input: "text-foreground",
                     inputWrapper: "bg-content2",
                   }}
+                  autoComplete="current-password"
+                  required
                 />
 
                 <div className="flex items-center justify-between">
+                  {/* ✅ FIXED: Remember me checkbox with proper server field alignment */}
                   <Checkbox
                     size="sm"
-                    isSelected={formData.remember}
+                    isSelected={formData.remember_me}
                     onValueChange={(checked) =>
-                      setFormData((prev) => ({ ...prev, remember: checked }))
+                      setFormData((prev) => ({ ...prev, remember_me: checked }))
                     }
+                    isDisabled={isAnyLoading}
                     classNames={{
                       label: "text-default-600",
                     }}
@@ -364,18 +535,20 @@ export default function LoginPage() {
                   <Link
                     href="/forgot-password"
                     className="text-sm text-primary hover:text-primary-600 transition-colors"
+                    tabIndex={isAnyLoading ? -1 : 0}
                   >
                     Forgot password?
                   </Link>
                 </div>
 
+                {/* ✅ FIXED: Submit button with proper loading states */}
                 <Button
                   type="submit"
                   color="primary"
                   size="lg"
                   className="w-full font-medium"
                   isLoading={isLoading}
-                  disabled={isLoading}
+                  disabled={isAnyLoading}
                 >
                   {isLoading ? "Signing in..." : "Sign In"}
                 </Button>
@@ -384,15 +557,17 @@ export default function LoginPage() {
               <Divider />
 
               <div className="space-y-3">
+                {/* ✅ FIXED: Demo button with proper loading state */}
                 <Button
                   variant="bordered"
                   size="lg"
                   className="w-full"
                   onPress={handleDemoLogin}
                   startContent={<Zap className="w-4 h-4" />}
-                  disabled={isLoading}
+                  isLoading={isDemoLoading}
+                  disabled={isAnyLoading}
                 >
-                  Try Demo Account
+                  {isDemoLoading ? "Logging in..." : "Try Demo Account"}
                 </Button>
 
                 <div className="text-center">
@@ -402,6 +577,7 @@ export default function LoginPage() {
                   <Link
                     href="/register"
                     className="text-sm text-primary hover:text-primary-600 transition-colors font-medium"
+                    tabIndex={isAnyLoading ? -1 : 0}
                   >
                     Sign up
                   </Link>
@@ -428,7 +604,7 @@ export default function LoginPage() {
             </CardFooter>
           </Card>
 
-          {/* Demo Credentials */}
+          {/* Demo Credentials Info */}
           <div className="mt-6 p-4 bg-content2/50 rounded-lg">
             <h3 className="text-sm font-medium text-foreground mb-2">
               Demo Credentials:
@@ -446,7 +622,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Debug Info - Remove in production */}
+          {/* ✅ ENHANCED: Debug info with API health status */}
           {process.env.NODE_ENV === "development" && (
             <div className="mt-4 p-3 bg-content1 rounded-lg border">
               <h4 className="text-xs font-semibold text-foreground mb-2">
@@ -455,6 +631,17 @@ export default function LoginPage() {
               <div className="text-xs text-default-500 space-y-1">
                 <div>API Base: {process.env.NEXT_PUBLIC_API_BASE}</div>
                 <div>Environment: {process.env.NODE_ENV}</div>
+                <div>
+                  Auth Status:{" "}
+                  {apiUtils.isAuthenticated()
+                    ? "✅ Authenticated"
+                    : "❌ Not Authenticated"}
+                </div>
+                <div>Token Expiry: {apiUtils.getTimeUntilExpiry()}</div>
+                <div>
+                  LocalStorage Available:{" "}
+                  {apiUtils.isLocalStorageAvailable() ? "✅" : "❌"}
+                </div>
               </div>
             </div>
           )}

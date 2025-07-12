@@ -68,6 +68,10 @@ import {
   Database,
   Wifi,
   WifiOff,
+  Factory,
+  Lightbulb,
+  Plug,
+  MonitorSpeaker,
 } from "lucide-react";
 
 // API and Types
@@ -86,9 +90,13 @@ import {
   ApiResponse,
   EquipmentQueryParams,
   AlertQueryParams,
+  EquipmentWithMaintenance,
+  MaintenanceLog,
+  ApiError,
 } from "@/types/api-types";
+import { extractErrorMessage } from "@/lib/api-utils";
 
-// Enhanced interfaces
+// Enhanced interfaces for UI state
 interface EquipmentStats {
   total: number;
   operational: number;
@@ -100,45 +108,35 @@ interface EquipmentStats {
   criticalAlerts: number;
 }
 
-interface MaintenanceRecord {
-  id: number;
-  equipment_id: number;
-  maintenance_type: string;
-  scheduled_date: string;
-  completed_date?: string;
-  technician_id?: number;
-  description: string;
-  work_performed?: string;
-  cost?: number;
-  downtime_minutes?: number;
-  status: string;
-  priority: string;
-  maintenance_notes?: string;
+interface EquipmentDetailsState {
+  equipment: Equipment | null;
+  alerts: Alert[];
+  maintenanceHistory: MaintenanceLog[];
+  analytics: any;
+  loading: boolean;
 }
 
-// FIXED: Complete equipment types matching the database
+// Equipment types matching exact API specification
 const equipmentTypes = [
   { key: "hvac" as const, label: "HVAC", icon: "🌡️", color: "primary" },
   { key: "lighting" as const, label: "Lighting", icon: "💡", color: "warning" },
-  { key: "motor" as const, label: "Motor", icon: "⚙️", color: "secondary" },
   {
-    key: "transformer" as const,
-    label: "Transformer",
-    icon: "🔌",
-    color: "success",
-  },
-  { key: "panel" as const, label: "Panel", icon: "📋", color: "default" },
-  { key: "ups" as const, label: "UPS", icon: "🔋", color: "primary" },
-  {
-    key: "generator" as const,
-    label: "Generator",
+    key: "electrical" as const,
+    label: "Electrical",
     icon: "⚡",
     color: "danger",
   },
-  { key: "others" as const, label: "Others", icon: "🔧", color: "default" },
+  {
+    key: "manufacturing" as const,
+    label: "Manufacturing",
+    icon: "🏭",
+    color: "secondary",
+  },
+  { key: "security" as const, label: "Security", icon: "🔒", color: "success" },
+  { key: "other" as const, label: "Other", icon: "🔧", color: "default" },
 ];
 
-// FIXED: Status options matching database ENUM
+// Status options matching API specification
 const statusOptions = [
   { key: "active" as const, label: "Active", color: "success" },
   { key: "maintenance" as const, label: "Maintenance", color: "warning" },
@@ -146,32 +144,29 @@ const statusOptions = [
   { key: "inactive" as const, label: "Inactive", color: "default" },
 ];
 
-const maintenanceUrgencyOptions = [
-  { key: "low", label: "Low Priority", color: "success" },
-  { key: "medium", label: "Medium Priority", color: "warning" },
-  { key: "high", label: "High Priority", color: "danger" },
-  { key: "critical", label: "Critical", color: "danger" },
+const maintenanceScheduleOptions = [
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" },
+  { key: "semi_annual", label: "Semi-Annual" },
+  { key: "annual", label: "Annual" },
 ];
 
-const healthStatusOptions = [
-  { key: "excellent", label: "Excellent", color: "success", range: [90, 100] },
-  { key: "good", label: "Good", color: "primary", range: [75, 89] },
-  { key: "fair", label: "Fair", color: "warning", range: [60, 74] },
-  { key: "poor", label: "Poor", color: "danger", range: [40, 59] },
-  { key: "critical", label: "Critical", color: "danger", range: [0, 39] },
-];
-
-// Type definitions
+// Type definitions matching API
 type EquipmentType =
   | "hvac"
   | "lighting"
-  | "motor"
-  | "transformer"
-  | "panel"
-  | "ups"
-  | "generator"
-  | "others";
+  | "electrical"
+  | "manufacturing"
+  | "security"
+  | "other";
 type EquipmentStatus = "active" | "maintenance" | "faulty" | "inactive";
+type MaintenanceScheduleType =
+  | "weekly"
+  | "monthly"
+  | "quarterly"
+  | "semi_annual"
+  | "annual";
 
 export default function EquipmentPage() {
   // State Management
@@ -185,6 +180,7 @@ export default function EquipmentPage() {
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Pagination state - Updated to match server response format
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 15,
@@ -196,11 +192,10 @@ export default function EquipmentPage() {
 
   // Filters and Search
   const [searchTerm, setSearchTerm] = useState("");
-  const [buildingFilter, setBuildingFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [maintenanceUrgencyFilter, setMaintenanceUrgencyFilter] = useState("");
-  const [sortBy, setSortBy] = useState("name");
+  const [buildingFilter, setBuildingFilter] = useState<string>("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [sortBy, setSortBy] = useState<keyof Equipment>("name");
   const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
 
   // Modals
@@ -244,26 +239,53 @@ export default function EquipmentPage() {
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(
     null
   );
-  const [equipmentDetails, setEquipmentDetails] = useState<any>(null);
-  const [equipmentAlerts, setEquipmentAlerts] = useState<Alert[]>([]);
-  const [equipmentAnalytics, setEquipmentAnalytics] = useState<any>(null);
-  const [maintenanceHistory, setMaintenanceHistory] = useState<
-    MaintenanceRecord[]
-  >([]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [equipmentDetails, setEquipmentDetails] =
+    useState<EquipmentDetailsState>({
+      equipment: null,
+      alerts: [],
+      maintenanceHistory: [],
+      analytics: null,
+      loading: false,
+    });
 
-  // Form State
-  const [formData, setFormData] = useState({
+  // Form State - Updated to match exact API field names
+  const [formData, setFormData] = useState<{
+    name: string;
+    code: string;
+    building_id: string;
+    equipment_type: EquipmentType;
+    manufacturer: string;
+    model: string;
+    serial_number: string;
+    power_rating_kw: string;
+    voltage_rating: string;
+    current_rating_a: string;
+    installation_date: string;
+    warranty_expiry: string;
+    location: string;
+    floor: string;
+    room: string;
+    maintenance_schedule: MaintenanceScheduleType;
+    condition_score: string;
+    notes: string;
+  }>({
     name: "",
+    code: "",
     building_id: "",
-    equipment_type: "hvac" as EquipmentType,
-    model: "",
+    equipment_type: "hvac",
     manufacturer: "",
+    model: "",
+    serial_number: "",
     power_rating_kw: "",
     voltage_rating: "",
+    current_rating_a: "",
     installation_date: "",
-    maintenance_schedule: "monthly",
+    warranty_expiry: "",
     location: "",
+    floor: "",
+    room: "",
+    maintenance_schedule: "monthly",
+    condition_score: "",
     notes: "",
   });
 
@@ -272,17 +294,16 @@ export default function EquipmentPage() {
 
   // Maintenance Form
   const [maintenanceFormData, setMaintenanceFormData] = useState({
-    maintenance_type: "preventive",
+    maintenance_type: "preventive" as const,
     scheduled_date: "",
     description: "",
-    priority: "medium",
     notes: "",
   });
 
   // Utility Functions
-  function safeArray<T>(input: any): T[] {
+  const safeArray = <T,>(input: any): T[] => {
     return Array.isArray(input) ? input : [];
-  }
+  };
 
   const getBuildingName = (equipment: Equipment): string => {
     if (equipment.building_name) return equipment.building_name;
@@ -299,156 +320,53 @@ export default function EquipmentPage() {
     );
   };
 
-  const getNextMaintenanceDate = (equipment: Equipment): string | null => {
-    if (equipment.next_maintenance_date) {
-      return equipment.next_maintenance_date;
-    }
-
-    if (equipment.maintenance_info?.next_maintenance_due) {
-      return equipment.maintenance_info.next_maintenance_due;
-    }
-
-    if (equipment.installation_date && equipment.maintenance_interval_days) {
-      const lastMaintenance = equipment.last_maintenance_date
-        ? new Date(equipment.last_maintenance_date)
-        : new Date(equipment.installation_date);
-
-      const nextDate = new Date(lastMaintenance);
-      nextDate.setDate(
-        nextDate.getDate() + equipment.maintenance_interval_days
-      );
-      return nextDate.toISOString().split("T")[0];
-    }
-
-    return null;
+  const getTypeInfo = (type: string) => {
+    return equipmentTypes.find((t) => t.key === type) || equipmentTypes[5]; // Default to "other"
   };
 
-  const getMaintenanceRiskLevel = (equipment: Equipment): string => {
-    if (equipment.maintenance_risk_level) {
-      return equipment.maintenance_risk_level;
-    }
-
-    const age = getEquipmentAge(equipment);
-    const condition = getEquipmentConditionScore(equipment);
-
-    if (condition < 60 || age > 10) return "high";
-    if (condition < 75 || age > 7) return "medium";
-    return "low";
+  const getStatusInfo = (status: string | undefined) => {
+    if (!status) return statusOptions[0]; // Default to "active"
+    return statusOptions.find((s) => s.key === status) || statusOptions[0];
   };
 
-  const getEquipmentConditionScore = (equipment: Equipment): number => {
-    if (equipment.condition_score) return equipment.condition_score;
-
-    if (equipment.health_status) {
-      const healthMap: Record<string, number> = {
-        excellent: 95,
-        good: 80,
-        fair: 65,
-        poor: 45,
-        critical: 25,
-      };
-      return healthMap[equipment.health_status] || 85;
-    }
-
-    return 85;
+  const getConditionScore = (equipment: Equipment): number => {
+    if (equipment.condition_score !== undefined)
+      return equipment.condition_score;
+    return 85; // Default score
   };
 
-  const getMaintenanceUrgency = (
-    equipment: Equipment
-  ): { level: string; color: string; days: number } => {
-    if (
-      equipment.maintenance_urgency !== undefined &&
-      equipment.maintenance_urgency !== null
-    ) {
-      const urgency = equipment.maintenance_urgency;
-      if (urgency === 0) return { level: "none", color: "success", days: 0 };
-      if (urgency <= 25)
-        return { level: "low", color: "success", days: urgency };
-      if (urgency <= 50)
-        return { level: "medium", color: "primary", days: urgency };
-      if (urgency <= 75)
-        return { level: "high", color: "warning", days: urgency };
-      return { level: "critical", color: "danger", days: urgency };
-    }
-
-    const nextMaintenanceDate = getNextMaintenanceDate(equipment);
-
-    if (!nextMaintenanceDate) {
-      return { level: "unknown", color: "default", days: 0 };
-    }
-
-    const daysUntil = Math.ceil(
-      (new Date(nextMaintenanceDate).getTime() - new Date().getTime()) /
-        (1000 * 60 * 60 * 24)
-    );
-
-    if (daysUntil < 0) {
-      return { level: "overdue", color: "danger", days: Math.abs(daysUntil) };
-    } else if (daysUntil <= 3) {
-      return { level: "critical", color: "danger", days: daysUntil };
-    } else if (daysUntil <= 7) {
-      return { level: "high", color: "warning", days: daysUntil };
-    } else if (daysUntil <= 14) {
-      return { level: "medium", color: "primary", days: daysUntil };
-    } else {
-      return { level: "low", color: "success", days: daysUntil };
-    }
-  };
-
-  const getHealthStatusInfo = (score: number) => {
-    const status =
-      healthStatusOptions.find(
-        (s) => score >= s.range[0] && score <= s.range[1]
-      ) || healthStatusOptions[4];
-    return status;
+  const getHealthStatus = (score: number): { label: string; color: string } => {
+    if (score >= 90) return { label: "Excellent", color: "success" };
+    if (score >= 75) return { label: "Good", color: "primary" };
+    if (score >= 60) return { label: "Fair", color: "warning" };
+    if (score >= 40) return { label: "Poor", color: "danger" };
+    return { label: "Critical", color: "danger" };
   };
 
   const getEquipmentAlerts = (equipmentId: number): Alert[] => {
     return alerts.filter((alert) => alert.equipment_id === equipmentId);
   };
 
-  const getTypeInfo = (type: string) => {
-    return equipmentTypes.find((t) => t.key === type) || equipmentTypes[7];
-  };
-
-  const getStatusInfo = (status: string) => {
-    return statusOptions.find((s) => s.key === status) || statusOptions[0];
-  };
-
   // Equipment Statistics
   const equipmentStats: EquipmentStats = useMemo(() => {
     const stats = {
       total: equipment.length,
-      operational: equipment.filter((e) => e.status === "active").length,
-      maintenance: equipment.filter((e) => e.status === "maintenance").length,
-      offline: equipment.filter(
-        (e) => e.status === "faulty" || e.status === "inactive"
+      operational: equipment.filter((e) => (e.status || "active") === "active")
+        .length,
+      maintenance: equipment.filter(
+        (e) => (e.status || "active") === "maintenance"
       ).length,
+      offline: equipment.filter((e) => {
+        const status = e.status || "active";
+        return status === "faulty" || status === "inactive";
+      }).length,
       avgCondition:
         equipment.length > 0
-          ? equipment.reduce(
-              (sum, e) => sum + getEquipmentConditionScore(e),
-              0
-            ) / equipment.length
+          ? equipment.reduce((sum, e) => sum + getConditionScore(e), 0) /
+            equipment.length
           : 0,
-      maintenanceDueSoon: equipment.filter((e) => {
-        const nextDate = getNextMaintenanceDate(e);
-        if (!nextDate) return false;
-        const daysUntil = Math.ceil(
-          (new Date(nextDate).getTime() - new Date().getTime()) /
-            (1000 * 60 * 60 * 24)
-        );
-        return daysUntil <= 7 && daysUntil > 0;
-      }).length,
-      maintenanceOverdue: equipment.filter((e) => {
-        const nextDate = getNextMaintenanceDate(e);
-        if (!nextDate) return false;
-        const daysUntil = Math.ceil(
-          (new Date(nextDate).getTime() - new Date().getTime()) /
-            (1000 * 60 * 60 * 24)
-        );
-        return daysUntil < 0;
-      }).length,
+      maintenanceDueSoon: 0, // Will be calculated based on maintenance schedule
+      maintenanceOverdue: 0, // Will be calculated based on maintenance schedule
       criticalAlerts: alerts.filter(
         (a) => a.severity === "critical" && a.status === "active"
       ).length,
@@ -462,74 +380,47 @@ export default function EquipmentPage() {
       setBuildingsLoading(true);
       console.log("🏢 Loading buildings...");
 
-      // Try multiple approaches to load buildings
-      const attempts = [
-        () => buildingsAPI.getAll({}),
-        () => buildingsAPI.getAll({ status: "active" }),
-        () => buildingsAPI.getAll({ building_type: "commercial" }),
-        () => buildingsAPI.getAll({ limit: 100 }),
-      ];
+      const response = await buildingsAPI.getAll({
+        status: "active",
+        limit: 100,
+      });
 
-      let buildingsData: Building[] = [];
+      console.log("🏢 Buildings API Response:", response);
 
-      for (const attempt of attempts) {
+      if (response.data?.success) {
+        // Extract buildings data from nested response structure
+        const buildingsData = response.data.data;
+        const buildings = safeArray<Building>(buildingsData);
+        console.log(
+          `✅ Successfully loaded ${buildings.length} buildings:`,
+          buildings
+        );
+        setBuildings(buildings);
+      } else {
+        console.warn("⚠️ Failed to load buildings:", response.data?.message);
+        // Try fallback without filters
         try {
-          const response = await attempt();
-          console.log("Buildings API response:", response.data);
-
-          if (response.data.success) {
-            let data = response.data.data;
-
-            // Handle nested data structure
-            if (data && typeof data === "object" && "data" in data) {
-              data = data.data;
-            }
-
-            if (Array.isArray(data) && data.length > 0) {
-              buildingsData = data;
-              console.log(
-                `✅ Successfully loaded ${buildingsData.length} buildings`
-              );
-              break;
-            }
+          const fallbackResponse = await buildingsAPI.getAll({});
+          if (fallbackResponse.data?.success) {
+            const fallbackBuildings = safeArray<Building>(
+              fallbackResponse.data.data
+            );
+            console.log(
+              `✅ Fallback: loaded ${fallbackBuildings.length} buildings`
+            );
+            setBuildings(fallbackBuildings);
           }
-        } catch (attemptError) {
-          console.warn("Building load attempt failed:", attemptError);
-          continue;
+        } catch (fallbackError) {
+          console.error("❌ Fallback also failed:", fallbackError);
+          setBuildings([]);
         }
       }
-
-      // If no buildings loaded, create a fallback
-      if (buildingsData.length === 0) {
-        console.warn(
-          "⚠️ No buildings loaded, checking equipment for building info..."
-        );
-        // Extract building info from equipment data
-        const buildingIds = [...new Set(equipment.map((e) => e.building_id))];
-        buildingsData = buildingIds.map((id) => {
-          const equipmentWithBuilding = equipment.find(
-            (e) => e.building_id === id
-          );
-          return {
-            id,
-            name: equipmentWithBuilding?.building_name || `Building ${id}`,
-            code: equipmentWithBuilding?.building_code || `B${id}`,
-            status: "active" as const,
-            building_type: equipmentWithBuilding?.building_type || "Unknown",
-            address: "",
-            area_sqm: 0,
-            floors: 1,
-          };
-        });
-        console.log(
-          `📋 Created ${buildingsData.length} building entries from equipment data`
-        );
-      }
-
-      setBuildings(buildingsData);
     } catch (error) {
       console.error("❌ Failed to load buildings:", error);
-      setError("Failed to load buildings. Some features may be limited.");
+      setError(
+        "Failed to load buildings. You can still create equipment by entering the building ID manually."
+      );
+      setBuildings([]);
     } finally {
       setBuildingsLoading(false);
     }
@@ -537,6 +428,7 @@ export default function EquipmentPage() {
 
   const loadEquipment = async () => {
     try {
+      // Build query parameters according to API specification
       const params: EquipmentQueryParams = {
         page: pagination.current_page,
         limit: pagination.per_page,
@@ -544,64 +436,69 @@ export default function EquipmentPage() {
         sortOrder,
       };
 
+      // Apply filters if they exist
       if (searchTerm.trim()) params.search = searchTerm.trim();
       if (buildingFilter) params.building_id = Number(buildingFilter);
-      if (typeFilter) params.equipment_type = typeFilter as EquipmentType;
-      if (statusFilter) params.status = statusFilter as EquipmentStatus;
+      if (typeFilter) params.equipment_type = typeFilter as any;
+      if (statusFilter) params.status = statusFilter as any;
 
       console.log("📡 Loading equipment with params:", params);
       const response = await equipmentAPI.getAll(params);
-      console.log("Equipment API response:", response.data);
+      console.log("📡 Equipment API Response:", response);
 
-      if (response.data.success) {
-        let equipmentData = response.data.data;
+      if (response.data?.success) {
+        const equipmentData = response.data.data;
+        const equipment = safeArray<Equipment>(equipmentData);
+        setEquipment(equipment);
 
-        if (
-          equipmentData &&
-          typeof equipmentData === "object" &&
-          "data" in equipmentData
-        ) {
-          equipmentData = equipmentData.data;
+        // Handle pagination from response
+        if (response.data.pagination) {
+          setPagination({
+            current_page: response.data.pagination.current_page || 1,
+            per_page: response.data.pagination.per_page || 15,
+            total_pages: response.data.pagination.total_pages || 1,
+            total_count: response.data.pagination.total_count || 0,
+            has_next_page: response.data.pagination.has_next_page || false,
+            has_prev_page: response.data.pagination.has_prev_page || false,
+          });
         }
 
-        if (Array.isArray(equipmentData)) {
-          console.log(`✅ Loaded ${equipmentData.length} equipment items`);
-          setEquipment(equipmentData);
-
-          if (response.data.pagination) {
-            setPagination(response.data.pagination);
-          } else if (equipmentData.length > 0) {
-            setPagination((prev) => ({
-              ...prev,
-              total_count: equipmentData.length,
-            }));
-          }
-        } else {
-          console.warn("⚠️ Equipment data is not an array:", equipmentData);
-          setEquipment([]);
-        }
+        console.log(`✅ Loaded ${equipment.length} equipment items`);
       } else {
-        console.warn("⚠️ API response unsuccessful:", response.data.message);
+        console.warn("⚠️ API response unsuccessful:", response.data?.message);
         setEquipment([]);
       }
 
-      // Load equipment alerts
+      // Load alerts for equipment
       try {
-        const alertsRes = await alertsAPI.getAll({
-          severity: "critical",
+        const alertsResponse = await alertsAPI.getAll({
           status: "active",
-          limit: 50,
+          limit: 100,
         });
-        if (alertsRes.data.success) {
-          setAlerts(safeArray<Alert>(alertsRes.data.data));
+
+        if (alertsResponse.data?.success) {
+          setAlerts(safeArray<Alert>(alertsResponse.data.data));
         }
       } catch (alertError) {
         console.warn("Failed to load alerts:", alertError);
+        setAlerts([]);
       }
     } catch (error) {
       console.error("❌ Failed to load equipment:", error);
-      setError("Failed to load equipment data");
+      const errorMessage = extractErrorMessage(error);
+      setError(`Failed to load equipment: ${errorMessage}`);
       setEquipment([]);
+    }
+  };
+
+  const loadMaintenanceSchedule = async () => {
+    try {
+      const response = await equipmentAPI.getMaintenanceSchedule();
+      if (response.data?.success) {
+        setMaintenanceSchedule(response.data.data);
+      }
+    } catch (error) {
+      console.warn("Failed to load maintenance schedule:", error);
     }
   };
 
@@ -609,24 +506,13 @@ export default function EquipmentPage() {
     try {
       setLoading(true);
       setError(null);
-
       console.log("🚀 Starting initial data load...");
 
-      // Load equipment first to get building references
-      await loadEquipment();
-
-      // Then load buildings
-      await loadBuildings();
-
-      // Load maintenance schedule
-      try {
-        const maintenanceRes = await equipmentAPI.getMaintenanceSchedule();
-        if (maintenanceRes.data.success) {
-          setMaintenanceSchedule(maintenanceRes.data.data);
-        }
-      } catch (maintenanceError) {
-        console.warn("Failed to load maintenance schedule:", maintenanceError);
-      }
+      await Promise.all([
+        loadBuildings(),
+        loadEquipment(),
+        loadMaintenanceSchedule(),
+      ]);
 
       console.log("✅ Initial data load completed");
     } catch (error) {
@@ -640,20 +526,7 @@ export default function EquipmentPage() {
   const refreshData = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([
-        loadEquipment(),
-        loadBuildings(),
-        equipmentAPI
-          .getMaintenanceSchedule()
-          .then((res) => {
-            if (res.data.success) {
-              setMaintenanceSchedule(res.data.data);
-            }
-          })
-          .catch((error) => {
-            console.error("Failed to refresh maintenance schedule:", error);
-          }),
-      ]);
+      await Promise.all([loadEquipment(), loadMaintenanceSchedule()]);
     } catch (error) {
       console.error("❌ Failed to refresh data:", error);
     } finally {
@@ -665,6 +538,8 @@ export default function EquipmentPage() {
     buildingFilter,
     typeFilter,
     statusFilter,
+    sortBy,
+    sortOrder,
   ]);
 
   // Effects
@@ -682,7 +557,6 @@ export default function EquipmentPage() {
     buildingFilter,
     typeFilter,
     statusFilter,
-    maintenanceUrgencyFilter,
     sortBy,
     sortOrder,
   ]);
@@ -692,91 +566,81 @@ export default function EquipmentPage() {
       if (!loading && !submitting) {
         refreshData();
       }
-    }, 30000);
+    }, 30000); // Refresh every 30 seconds
 
     return () => clearInterval(interval);
-  }, [loading, submitting]);
+  }, [refreshData, loading, submitting]);
 
-  // Modal Handlers - COMPLETE IMPLEMENTATIONS
+  // Modal Handlers
   const openViewModal = async (equipment: Equipment) => {
     setSelectedEquipment(equipment);
-    setLoadingDetails(true);
+    setEquipmentDetails((prev) => ({ ...prev, loading: true }));
     onViewOpen();
 
     try {
       console.log(`🔍 Loading details for equipment ${equipment.id}...`);
 
-      const [detailsRes, alertsRes, analyticsRes, maintenanceRes] =
-        await Promise.allSettled([
-          equipmentAPI.getById(equipment.id),
-          alertsAPI.getAll({ equipment_id: equipment.id, limit: 10 }),
-          equipmentAPI.getPerformanceAnalytics(equipment.id, "monthly"),
-          equipmentAPI.getMaintenanceHistory(equipment.id),
-        ]);
+      const [detailsRes, alertsRes, maintenanceRes] = await Promise.allSettled([
+        equipmentAPI.getById(equipment.id),
+        alertsAPI.getAll({ equipment_id: equipment.id, limit: 10 }),
+        equipmentAPI.getMaintenanceHistory(equipment.id),
+      ]);
+
+      const newState: EquipmentDetailsState = {
+        equipment: equipment,
+        alerts: [],
+        maintenanceHistory: [],
+        analytics: null,
+        loading: false,
+      };
 
       // Handle equipment details
-      if (detailsRes.status === "fulfilled" && detailsRes.value.data.success) {
-        setEquipmentDetails(detailsRes.value.data.data);
-        console.log("✅ Equipment details loaded");
-      } else {
-        console.warn("⚠️ Failed to load equipment details");
+      if (detailsRes.status === "fulfilled" && detailsRes.value.data?.success) {
+        newState.equipment = detailsRes.value.data.data;
       }
 
       // Handle alerts
-      if (alertsRes.status === "fulfilled" && alertsRes.value.data.success) {
-        setEquipmentAlerts(safeArray<Alert>(alertsRes.value.data.data));
-        console.log("✅ Equipment alerts loaded");
-      } else {
-        console.warn("⚠️ Failed to load equipment alerts");
-        setEquipmentAlerts([]);
-      }
-
-      // Handle analytics
-      if (
-        analyticsRes.status === "fulfilled" &&
-        analyticsRes.value.data.success
-      ) {
-        setEquipmentAnalytics(analyticsRes.value.data.data);
-        console.log("✅ Equipment analytics loaded");
-      } else {
-        console.warn("⚠️ Failed to load equipment analytics");
-        setEquipmentAnalytics(null);
+      if (alertsRes.status === "fulfilled" && alertsRes.value.data?.success) {
+        newState.alerts = safeArray<Alert>(alertsRes.value.data.data);
       }
 
       // Handle maintenance history
       if (
         maintenanceRes.status === "fulfilled" &&
-        maintenanceRes.value.data.success
+        maintenanceRes.value.data?.success
       ) {
-        setMaintenanceHistory(
-          safeArray<MaintenanceRecord>(maintenanceRes.value.data.data)
+        newState.maintenanceHistory = safeArray<MaintenanceLog>(
+          maintenanceRes.value.data.data
         );
-        console.log("✅ Maintenance history loaded");
-      } else {
-        console.warn("⚠️ Failed to load maintenance history");
-        setMaintenanceHistory([]);
       }
+
+      setEquipmentDetails(newState);
     } catch (error) {
       console.error("❌ Failed to load equipment details:", error);
-    } finally {
-      setLoadingDetails(false);
+      setEquipmentDetails((prev) => ({ ...prev, loading: false }));
     }
   };
 
   const openMaintenanceModal = async (equipment: Equipment) => {
     setSelectedEquipment(equipment);
-    setLoadingDetails(true);
+    setEquipmentDetails((prev) => ({ ...prev, loading: true }));
 
     try {
       const response = await equipmentAPI.getMaintenanceHistory(equipment.id);
-      if (response.data.success) {
-        setMaintenanceHistory(safeArray<MaintenanceRecord>(response.data.data));
+      if (response.data?.success) {
+        setEquipmentDetails((prev) => ({
+          ...prev,
+          maintenanceHistory: safeArray<MaintenanceLog>(response.data.data),
+          loading: false,
+        }));
       }
     } catch (error) {
       console.error("Failed to load maintenance history:", error);
-      setMaintenanceHistory([]);
-    } finally {
-      setLoadingDetails(false);
+      setEquipmentDetails((prev) => ({
+        ...prev,
+        maintenanceHistory: [],
+        loading: false,
+      }));
     }
 
     onMaintenanceOpen();
@@ -784,7 +648,7 @@ export default function EquipmentPage() {
 
   const openAlertsModal = async (equipment: Equipment) => {
     setSelectedEquipment(equipment);
-    setLoadingDetails(true);
+    setEquipmentDetails((prev) => ({ ...prev, loading: true }));
 
     try {
       const response = await alertsAPI.getAll({
@@ -793,14 +657,21 @@ export default function EquipmentPage() {
         sortBy: "created_at",
         sortOrder: "DESC",
       });
-      if (response.data.success) {
-        setEquipmentAlerts(safeArray<Alert>(response.data.data));
+
+      if (response.data?.success) {
+        setEquipmentDetails((prev) => ({
+          ...prev,
+          alerts: safeArray<Alert>(response.data.data),
+          loading: false,
+        }));
       }
     } catch (error) {
       console.error("Failed to load equipment alerts:", error);
-      setEquipmentAlerts([]);
-    } finally {
-      setLoadingDetails(false);
+      setEquipmentDetails((prev) => ({
+        ...prev,
+        alerts: [],
+        loading: false,
+      }));
     }
 
     onAlertsOpen();
@@ -808,21 +679,27 @@ export default function EquipmentPage() {
 
   const openAnalyticsModal = async (equipment: Equipment) => {
     setSelectedEquipment(equipment);
-    setLoadingDetails(true);
+    setEquipmentDetails((prev) => ({ ...prev, loading: true }));
 
     try {
       const response = await equipmentAPI.getPerformanceAnalytics(
         equipment.id,
-        "quarterly"
+        "monthly"
       );
-      if (response.data.success) {
-        setEquipmentAnalytics(response.data.data);
+      if (response.data?.success) {
+        setEquipmentDetails((prev) => ({
+          ...prev,
+          analytics: response.data.data,
+          loading: false,
+        }));
       }
     } catch (error) {
       console.error("Failed to load analytics:", error);
-      setEquipmentAnalytics(null);
-    } finally {
-      setLoadingDetails(false);
+      setEquipmentDetails((prev) => ({
+        ...prev,
+        analytics: null,
+        loading: false,
+      }));
     }
 
     onAnalyticsOpen();
@@ -837,15 +714,22 @@ export default function EquipmentPage() {
   const resetForm = () => {
     setFormData({
       name: "",
+      code: "",
       building_id: "",
       equipment_type: "hvac",
-      model: "",
       manufacturer: "",
+      model: "",
+      serial_number: "",
       power_rating_kw: "",
       voltage_rating: "",
+      current_rating_a: "",
       installation_date: "",
-      maintenance_schedule: "monthly",
+      warranty_expiry: "",
       location: "",
+      floor: "",
+      room: "",
+      maintenance_schedule: "monthly",
+      condition_score: "",
       notes: "",
     });
     setFormErrors({});
@@ -854,55 +738,107 @@ export default function EquipmentPage() {
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
+    // Required field validation
     if (!formData.name.trim()) errors.name = "Equipment name is required";
     if (!formData.building_id) errors.building_id = "Building is required";
     if (!formData.manufacturer.trim())
       errors.manufacturer = "Manufacturer is required";
     if (!formData.model.trim()) errors.model = "Model is required";
-    if (!formData.power_rating_kw || isNaN(Number(formData.power_rating_kw))) {
-      errors.power_rating_kw = "Valid power rating is required";
-    }
     if (!formData.location.trim()) errors.location = "Location is required";
 
+    // Numeric field validation
+    if (formData.power_rating_kw && isNaN(Number(formData.power_rating_kw))) {
+      errors.power_rating_kw = "Power rating must be a valid number";
+    }
+
+    if (formData.voltage_rating && isNaN(Number(formData.voltage_rating))) {
+      errors.voltage_rating = "Voltage rating must be a valid number";
+    }
+
+    if (formData.current_rating_a && isNaN(Number(formData.current_rating_a))) {
+      errors.current_rating_a = "Current rating must be a valid number";
+    }
+
+    if (
+      formData.condition_score &&
+      (isNaN(Number(formData.condition_score)) ||
+        Number(formData.condition_score) < 0 ||
+        Number(formData.condition_score) > 100)
+    ) {
+      errors.condition_score = "Condition score must be between 0 and 100";
+    }
+
+    if (formData.floor && isNaN(Number(formData.floor))) {
+      errors.floor = "Floor must be a valid number";
+    }
+
     setFormErrors(errors);
+    console.log("Form validation errors:", errors);
     return Object.keys(errors).length === 0;
   };
 
+  // Utility to build equipment payload from form
+  const buildEquipmentPayload = (): Partial<Equipment> => {
+    const data: Partial<Equipment> = {
+      name: formData.name,
+      building_id: Number(formData.building_id),
+      equipment_type: formData.equipment_type,
+      manufacturer: formData.manufacturer,
+      model: formData.model,
+      location: formData.location,
+    };
+    
+    if (formData.code) data.code = formData.code;
+    if (formData.serial_number) data.serial_number = formData.serial_number;
+    if (formData.power_rating_kw) data.power_rating_kw = Number(formData.power_rating_kw);
+    if (formData.voltage_rating) data.voltage_rating = Number(formData.voltage_rating);
+    if (formData.current_rating_a) data.current_rating_a = Number(formData.current_rating_a);
+    if (formData.installation_date) data.installation_date = formData.installation_date;
+    if (formData.warranty_expiry) data.warranty_expiry = formData.warranty_expiry;
+    if (formData.floor) data.floor = Number(formData.floor);
+    if (formData.room) data.room = formData.room;
+    if (formData.maintenance_schedule) data.maintenance_schedule = formData.maintenance_schedule;
+    if (formData.condition_score) data.condition_score = Number(formData.condition_score);
+    if (formData.notes) data.notes = formData.notes;
+    
+    return data;
+  };
+
   const handleCreate = async () => {
+    console.log("🔨 Starting equipment creation...");
     if (!validateForm()) return;
 
     try {
       setSubmitting(true);
+      const equipmentData = buildEquipmentPayload();
 
-      const equipmentData: Partial<Equipment> = {
-        name: formData.name,
-        building_id: Number(formData.building_id),
-        equipment_type: formData.equipment_type,
-        model: formData.model,
-        manufacturer: formData.manufacturer,
-        power_rating_kw: Number(formData.power_rating_kw),
-        voltage_rating_v: formData.voltage_rating
-          ? Number(formData.voltage_rating)
-          : undefined,
-        installation_date: formData.installation_date || undefined,
-        location: formData.location,
-      };
-
-      console.log("🔨 Creating equipment:", equipmentData);
       const response = await equipmentAPI.create(equipmentData);
+      console.log("📡 API Response:", response);
 
-      if (response.data.success) {
+      if (response.data?.success) {
         console.log("✅ Equipment created successfully");
         await loadEquipment();
         onCreateClose();
         resetForm();
+        setError(null);
       } else {
-        console.error("❌ Failed to create equipment:", response.data.message);
-        setError("Failed to create equipment: " + response.data.message);
+        console.error("❌ Failed to create equipment:", response.data);
+        setError(`Failed to create equipment: ${response.data?.message || "Unknown error"}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Failed to create equipment:", error);
-      setError("Failed to create equipment. Please try again.");
+      const errorMessage = extractErrorMessage(error);
+      setError(`Failed to create equipment: ${errorMessage}`);
+
+      if (error?.response?.data?.validation_errors) {
+        const validationErrors: Record<string, string> = {};
+        error.response.data.validation_errors.forEach(
+          (validationError: { field: string; message: string }) => {
+            validationErrors[validationError.field] = validationError.message;
+          }
+        );
+        setFormErrors(validationErrors);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -913,40 +849,35 @@ export default function EquipmentPage() {
 
     try {
       setSubmitting(true);
+      const equipmentData = buildEquipmentPayload();
 
-      const equipmentData: Partial<Equipment> = {
-        name: formData.name,
-        building_id: Number(formData.building_id),
-        equipment_type: formData.equipment_type,
-        model: formData.model,
-        manufacturer: formData.manufacturer,
-        power_rating_kw: Number(formData.power_rating_kw),
-        voltage_rating_v: formData.voltage_rating
-          ? Number(formData.voltage_rating)
-          : undefined,
-        installation_date: formData.installation_date || undefined,
-        location: formData.location,
-      };
+      console.log("🔧 Updating equipment:", selectedEquipment.id, equipmentData);
+      const response = await equipmentAPI.update(selectedEquipment.id, equipmentData);
 
-      console.log("✏️ Updating equipment:", equipmentData);
-      const response = await equipmentAPI.update(
-        selectedEquipment.id,
-        equipmentData
-      );
-
-      if (response.data.success) {
+      if (response.data?.success) {
         console.log("✅ Equipment updated successfully");
         await loadEquipment();
         onEditClose();
         resetForm();
-        setSelectedEquipment(null);
+        setError(null);
       } else {
-        console.error("❌ Failed to update equipment:", response.data.message);
-        setError("Failed to update equipment: " + response.data.message);
+        console.error("❌ Failed to update equipment:", response.data?.message);
+        setError("Failed to update equipment: " + response.data?.message);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Failed to update equipment:", error);
-      setError("Failed to update equipment. Please try again.");
+      const errorMessage = extractErrorMessage(error);
+      setError(`Failed to update equipment: ${errorMessage}`);
+
+      if (error?.response?.data?.validation_errors) {
+        const validationErrors: Record<string, string> = {};
+        error.response.data.validation_errors.forEach(
+          (validationError: { field: string; message: string }) => {
+            validationErrors[validationError.field] = validationError.message;
+          }
+        );
+        setFormErrors(validationErrors);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -960,16 +891,17 @@ export default function EquipmentPage() {
       console.log("🗑️ Deleting equipment:", equipment.id);
       const response = await equipmentAPI.delete(equipment.id);
 
-      if (response.data.success) {
+      if (response.data?.success) {
         console.log("✅ Equipment deleted successfully");
         await loadEquipment();
       } else {
-        console.error("❌ Failed to delete equipment:", response.data.message);
-        setError("Failed to delete equipment: " + response.data.message);
+        console.error("❌ Failed to delete equipment:", response.data?.message);
+        setError("Failed to delete equipment: " + response.data?.message);
       }
     } catch (error) {
       console.error("❌ Failed to delete equipment:", error);
-      setError("Failed to delete equipment. Please try again.");
+      const errorMessage = extractErrorMessage(error);
+      setError(`Failed to delete equipment: ${errorMessage}`);
     }
   };
 
@@ -977,17 +909,23 @@ export default function EquipmentPage() {
     setSelectedEquipment(equipment);
     setFormData({
       name: equipment.name,
+      code: equipment.code || "",
       building_id: equipment.building_id.toString(),
       equipment_type: equipment.equipment_type,
-      model: equipment.model || "",
       manufacturer: equipment.manufacturer || "",
+      model: equipment.model || "",
+      serial_number: equipment.serial_number || "",
       power_rating_kw: equipment.power_rating_kw?.toString() || "",
-      voltage_rating: equipment.voltage_rating_v?.toString() || "",
+      voltage_rating: equipment.voltage_rating?.toString() || "",
+      current_rating_a: equipment.current_rating_a?.toString() || "",
       installation_date: equipment.installation_date || "",
-      maintenance_schedule:
-        equipment.maintenance_info?.maintenance_type || "monthly",
+      warranty_expiry: equipment.warranty_expiry || "",
       location: equipment.location || "",
-      notes: "",
+      floor: equipment.floor?.toString() || "",
+      room: equipment.room || "",
+      maintenance_schedule: equipment.maintenance_schedule || "monthly",
+      condition_score: equipment.condition_score?.toString() || "",
+      notes: equipment.notes || "",
     });
     onEditOpen();
   };
@@ -1004,9 +942,8 @@ export default function EquipmentPage() {
         maintenance_type: maintenanceFormData.maintenance_type,
         scheduled_date: maintenanceFormData.scheduled_date,
         description: maintenanceFormData.description,
-        priority: maintenanceFormData.priority,
-        maintenance_notes: maintenanceFormData.notes,
-        status: "scheduled",
+        notes: maintenanceFormData.notes,
+        status: "scheduled" as const,
       };
 
       console.log("📝 Logging maintenance:", maintenanceData);
@@ -1015,16 +952,18 @@ export default function EquipmentPage() {
         maintenanceData
       );
 
-      if (response.data.success) {
+      if (response.data?.success) {
         console.log("✅ Maintenance logged successfully");
+
         // Reload maintenance history
         const historyRes = await equipmentAPI.getMaintenanceHistory(
           selectedEquipment.id
         );
-        if (historyRes.data.success) {
-          setMaintenanceHistory(
-            safeArray<MaintenanceRecord>(historyRes.data.data)
-          );
+        if (historyRes.data?.success) {
+          setEquipmentDetails((prev) => ({
+            ...prev,
+            maintenanceHistory: safeArray<MaintenanceLog>(historyRes.data.data),
+          }));
         }
 
         // Reset form
@@ -1032,16 +971,16 @@ export default function EquipmentPage() {
           maintenance_type: "preventive",
           scheduled_date: "",
           description: "",
-          priority: "medium",
           notes: "",
         });
       } else {
-        console.error("❌ Failed to log maintenance:", response.data.message);
-        setError("Failed to log maintenance: " + response.data.message);
+        console.error("❌ Failed to log maintenance:", response.data?.message);
+        setError("Failed to log maintenance: " + response.data?.message);
       }
     } catch (error) {
       console.error("❌ Failed to log maintenance:", error);
-      setError("Failed to log maintenance. Please try again.");
+      const errorMessage = extractErrorMessage(error);
+      setError(`Failed to log maintenance: ${errorMessage}`);
     } finally {
       setSubmitting(false);
     }
@@ -1061,13 +1000,6 @@ export default function EquipmentPage() {
   const handleStatusFilterChange = (keys: "all" | Set<React.Key>) => {
     const selectedKey = keys === "all" ? "" : (Array.from(keys)[0] as string);
     setStatusFilter(selectedKey || "");
-  };
-
-  const handleMaintenanceUrgencyFilterChange = (
-    keys: "all" | Set<React.Key>
-  ) => {
-    const selectedKey = keys === "all" ? "" : (Array.from(keys)[0] as string);
-    setMaintenanceUrgencyFilter(selectedKey || "");
   };
 
   // Form change handlers
@@ -1092,19 +1024,18 @@ export default function EquipmentPage() {
       keys === "all" ? "monthly" : (Array.from(keys)[0] as string);
     setFormData((prev) => ({
       ...prev,
-      maintenance_schedule: selectedKey || "monthly",
+      maintenance_schedule:
+        (selectedKey as MaintenanceScheduleType) || "monthly",
     }));
   };
 
   // Filter options
   const buildingFilterOptions = [
     { key: "", label: "All Buildings" },
-    ...(Array.isArray(buildings)
-      ? buildings.map((building) => ({
-          key: building.id.toString(),
-          label: building.name,
-        }))
-      : []),
+    ...buildings.map((building) => ({
+      key: building.id.toString(),
+      label: building.name,
+    })),
   ];
 
   const typeFilterOptions = [
@@ -1202,20 +1133,34 @@ export default function EquipmentPage() {
             Refresh
           </Button>
           <Button
+            variant="flat"
+            color="secondary"
+            startContent={<Settings className="w-4 h-4" />}
+            onPress={() => {
+              console.log("🔍 Debug Info:");
+              console.log("Buildings:", buildings);
+              console.log("Equipment:", equipment);
+              console.log("Form Data:", formData);
+              console.log("Equipment Stats:", equipmentStats);
+              console.log("Pagination:", pagination);
+            }}
+          >
+            Debug
+          </Button>
+          <Button
             color="primary"
             startContent={<Plus className="w-4 h-4" />}
             onPress={() => {
               resetForm();
               onCreateOpen();
             }}
-            isDisabled={buildings.length === 0 && !buildingsLoading}
           >
             Add Equipment
           </Button>
         </div>
       </div>
 
-      {/* Enhanced Statistics Dashboard */}
+      {/* Statistics Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card className="border-l-4 border-l-foreground">
           <CardBody className="p-4">
@@ -1259,15 +1204,13 @@ export default function EquipmentPage() {
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-default-600">Maintenance Due</p>
+                <p className="text-sm text-default-600">Maintenance</p>
                 <p className="text-2xl font-bold text-warning">
-                  {equipmentStats.maintenanceDueSoon}
+                  {equipmentStats.maintenance}
                 </p>
-                <p className="text-xs text-default-500">
-                  {equipmentStats.maintenanceOverdue} overdue
-                </p>
+                <p className="text-xs text-default-500">Scheduled/Ongoing</p>
               </div>
-              <Clock className="w-8 h-8 text-warning" />
+              <Wrench className="w-8 h-8 text-warning" />
             </div>
           </CardBody>
         </Card>
@@ -1299,8 +1242,7 @@ export default function EquipmentPage() {
                   aria-label="Average equipment health"
                   value={equipmentStats.avgCondition}
                   color={
-                    getHealthStatusInfo(equipmentStats.avgCondition)
-                      .color as any
+                    getHealthStatus(equipmentStats.avgCondition).color as any
                   }
                   size="sm"
                   className="mt-1"
@@ -1312,10 +1254,10 @@ export default function EquipmentPage() {
         </Card>
       </div>
 
-      {/* Enhanced Filters */}
+      {/* Filters */}
       <Card>
         <CardBody>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
             <Input
               placeholder="Search equipment..."
               value={searchTerm}
@@ -1356,18 +1298,6 @@ export default function EquipmentPage() {
               ))}
             </Select>
 
-            <Select
-              placeholder="Urgency"
-              selectedKeys={
-                maintenanceUrgencyFilter ? [maintenanceUrgencyFilter] : []
-              }
-              onSelectionChange={handleMaintenanceUrgencyFilterChange}
-            >
-              {maintenanceUrgencyOptions.map((option) => (
-                <SelectItem key={option.key}>{option.label}</SelectItem>
-              ))}
-            </Select>
-
             <Button
               variant="light"
               startContent={<Filter className="w-4 h-4" />}
@@ -1376,7 +1306,6 @@ export default function EquipmentPage() {
                 setBuildingFilter("");
                 setTypeFilter("");
                 setStatusFilter("");
-                setMaintenanceUrgencyFilter("");
               }}
             >
               Clear
@@ -1385,25 +1314,1129 @@ export default function EquipmentPage() {
         </CardBody>
       </Card>
 
+      {/* Create/Edit Equipment Modal */}
+      <Modal
+        isOpen={isCreateOpen || isEditOpen}
+        onOpenChange={isCreateOpen ? onCreateClose : onEditClose}
+        size="4xl"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>
+                <div className="flex items-center">
+                  <Settings className="w-5 h-5 mr-2" />
+                  {isCreateOpen ? "Add New Equipment" : "Edit Equipment"}
+                </div>
+              </ModalHeader>
+              <ModalBody className="space-y-4">
+                {/* Show warning if no buildings loaded */}
+                {buildings.length === 0 && !buildingsLoading && (
+                  <div className="flex items-center p-4 bg-warning-50 rounded-lg">
+                    <AlertTriangle className="w-5 h-5 mr-2 text-warning" />
+                    <div>
+                      <span className="text-warning font-medium">
+                        Buildings not loaded.{" "}
+                      </span>
+                      <span className="text-warning-600">
+                        You can still create equipment by entering the building
+                        ID manually. Make sure the building ID exists in your
+                        system.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Show building loading state */}
+                {buildingsLoading && (
+                  <div className="flex items-center p-4 bg-primary-50 rounded-lg">
+                    <Spinner size="sm" color="primary" className="mr-2" />
+                    <span className="text-primary">Loading buildings...</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Equipment Name"
+                    placeholder="Enter equipment name"
+                    value={formData.name}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    errorMessage={formErrors.name}
+                    isInvalid={!!formErrors.name}
+                    isRequired
+                  />
+
+                  <Input
+                    label="Equipment Code"
+                    placeholder="Enter equipment code (optional)"
+                    value={formData.code}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, code: e.target.value }))
+                    }
+                    errorMessage={formErrors.code}
+                    isInvalid={!!formErrors.code}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {buildings.length > 0 ? (
+                    <Select
+                      label="Building"
+                      placeholder="Select building"
+                      selectedKeys={
+                        formData.building_id ? [formData.building_id] : []
+                      }
+                      onSelectionChange={handleFormBuildingChange}
+                      errorMessage={formErrors.building_id}
+                      isInvalid={!!formErrors.building_id}
+                      isRequired
+                      isLoading={buildingsLoading}
+                    >
+                      {buildings.map((building) => (
+                        <SelectItem key={building.id.toString()}>
+                          {building.name} (
+                          {building.code || `ID: ${building.id}`}) -{" "}
+                          {building.building_type}
+                        </SelectItem>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      label="Building ID"
+                      placeholder="Enter building ID"
+                      value={formData.building_id}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          building_id: e.target.value,
+                        }))
+                      }
+                      errorMessage={formErrors.building_id}
+                      isInvalid={!!formErrors.building_id}
+                      isRequired
+                      description={
+                        buildingsLoading
+                          ? "Loading buildings..."
+                          : "Buildings list not available. Enter building ID manually."
+                      }
+                    />
+                  )}
+
+                  <Select
+                    label="Equipment Type"
+                    selectedKeys={[formData.equipment_type]}
+                    onSelectionChange={handleFormEquipmentTypeChange}
+                    isRequired
+                  >
+                    {equipmentTypes.map((type) => (
+                      <SelectItem key={type.key}>
+                        {type.icon} {type.label}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Manufacturer"
+                    placeholder="Enter manufacturer"
+                    value={formData.manufacturer}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        manufacturer: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.manufacturer}
+                    isInvalid={!!formErrors.manufacturer}
+                    isRequired
+                  />
+
+                  <Input
+                    label="Model"
+                    placeholder="Enter model"
+                    value={formData.model}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        model: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.model}
+                    isInvalid={!!formErrors.model}
+                    isRequired
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Serial Number"
+                    placeholder="Enter serial number"
+                    value={formData.serial_number}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        serial_number: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.serial_number}
+                    isInvalid={!!formErrors.serial_number}
+                  />
+
+                  <Select
+                    label="Maintenance Schedule"
+                    selectedKeys={[formData.maintenance_schedule]}
+                    onSelectionChange={handleFormMaintenanceScheduleChange}
+                  >
+                    {maintenanceScheduleOptions.map((option) => (
+                      <SelectItem key={option.key}>{option.label}</SelectItem>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Input
+                    label="Power Rating (kW)"
+                    placeholder="0.0"
+                    type="number"
+                    step="0.1"
+                    value={formData.power_rating_kw}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        power_rating_kw: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.power_rating_kw}
+                    isInvalid={!!formErrors.power_rating_kw}
+                  />
+
+                  <Input
+                    label="Voltage Rating (V)"
+                    placeholder="220"
+                    type="number"
+                    value={formData.voltage_rating}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        voltage_rating: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.voltage_rating}
+                    isInvalid={!!formErrors.voltage_rating}
+                  />
+
+                  <Input
+                    label="Current Rating (A)"
+                    placeholder="10"
+                    type="number"
+                    step="0.1"
+                    value={formData.current_rating_a}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        current_rating_a: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.current_rating_a}
+                    isInvalid={!!formErrors.current_rating_a}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Installation Date"
+                    type="date"
+                    value={formData.installation_date}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        installation_date: e.target.value,
+                      }))
+                    }
+                  />
+
+                  <Input
+                    label="Warranty Expiry"
+                    type="date"
+                    value={formData.warranty_expiry}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        warranty_expiry: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Input
+                    label="Location"
+                    placeholder="Enter location within building"
+                    value={formData.location}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        location: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.location}
+                    isInvalid={!!formErrors.location}
+                    isRequired
+                  />
+
+                  <Input
+                    label="Floor"
+                    placeholder="Floor number"
+                    type="number"
+                    value={formData.floor}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        floor: e.target.value,
+                      }))
+                    }
+                    errorMessage={formErrors.floor}
+                    isInvalid={!!formErrors.floor}
+                  />
+
+                  <Input
+                    label="Room"
+                    placeholder="Room identifier"
+                    value={formData.room}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, room: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <Input
+                  label="Condition Score (%)"
+                  placeholder="0-100"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={formData.condition_score}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      condition_score: e.target.value,
+                    }))
+                  }
+                  errorMessage={formErrors.condition_score}
+                  isInvalid={!!formErrors.condition_score}
+                />
+
+                <Textarea
+                  label="Notes"
+                  placeholder="Additional notes or specifications"
+                  value={formData.notes}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, notes: e.target.value }))
+                  }
+                  minRows={3}
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  color="secondary"
+                  variant="flat"
+                  onPress={() => {
+                    console.log("🔍 Current form state:", formData);
+                    console.log("🔍 Current form errors:", formErrors);
+                    console.log("🔍 Buildings available:", buildings);
+                    console.log("🔍 Buildings loading:", buildingsLoading);
+                  }}
+                >
+                  Debug Form
+                </Button>
+                <Button
+                  color="primary"
+                  onPress={isCreateOpen ? handleCreate : handleEdit}
+                  isLoading={submitting}
+                  startContent={
+                    isCreateOpen ? (
+                      <Plus className="w-4 h-4" />
+                    ) : (
+                      <Edit className="w-4 h-4" />
+                    )
+                  }
+                >
+                  {isCreateOpen ? "Create Equipment" : "Update Equipment"}
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* Equipment Details Modal */}
+      <Modal
+        isOpen={isViewOpen}
+        onOpenChange={onViewClose}
+        size="5xl"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>
+                <div className="flex items-center">
+                  <Eye className="w-5 h-5 mr-2" />
+                  {selectedEquipment?.name} - Details
+                  {equipmentDetails.loading && (
+                    <Spinner size="sm" className="ml-2" />
+                  )}
+                </div>
+              </ModalHeader>
+              <ModalBody>
+                {selectedEquipment && (
+                  <Tabs aria-label="Equipment details tabs" color="primary">
+                    <Tab
+                      key="overview"
+                      title={
+                        <div className="flex items-center">
+                          <Cpu className="w-4 h-4 mr-2" />
+                          Overview
+                        </div>
+                      }
+                    >
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <Card>
+                            <CardHeader>
+                              <h4 className="font-semibold">
+                                Basic Information
+                              </h4>
+                            </CardHeader>
+                            <CardBody className="space-y-3">
+                              <div className="flex justify-between">
+                                <span className="text-default-600">Code:</span>
+                                <span className="font-medium">
+                                  {selectedEquipment.code ||
+                                    `EQ-${selectedEquipment.id.toString().padStart(4, "0")}`}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-default-600">Type:</span>
+                                <Chip
+                                  color={
+                                    getTypeInfo(
+                                      selectedEquipment.equipment_type
+                                    ).color as any
+                                  }
+                                  size="sm"
+                                >
+                                  {
+                                    getTypeInfo(
+                                      selectedEquipment.equipment_type
+                                    ).label
+                                  }
+                                </Chip>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-default-600">
+                                  Status:
+                                </span>
+                                <Chip
+                                  color={
+                                    getStatusInfo(selectedEquipment.status)
+                                      .color as any
+                                  }
+                                  size="sm"
+                                >
+                                  {
+                                    getStatusInfo(selectedEquipment.status)
+                                      .label
+                                  }
+                                </Chip>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-default-600">
+                                  Manufacturer:
+                                </span>
+                                <span className="font-medium">
+                                  {selectedEquipment.manufacturer}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-default-600">Model:</span>
+                                <span className="font-medium">
+                                  {selectedEquipment.model}
+                                </span>
+                              </div>
+                              {selectedEquipment.serial_number && (
+                                <div className="flex justify-between">
+                                  <span className="text-default-600">
+                                    Serial Number:
+                                  </span>
+                                  <span className="font-medium">
+                                    {selectedEquipment.serial_number}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span className="text-default-600">
+                                  Location:
+                                </span>
+                                <span className="font-medium">
+                                  {selectedEquipment.location}
+                                </span>
+                              </div>
+                              {selectedEquipment.installation_date && (
+                                <div className="flex justify-between">
+                                  <span className="text-default-600">Age:</span>
+                                  <span className="font-medium">
+                                    {getEquipmentAge(selectedEquipment).toFixed(
+                                      1
+                                    )}{" "}
+                                    years
+                                  </span>
+                                </div>
+                              )}
+                            </CardBody>
+                          </Card>
+
+                          <Card>
+                            <CardHeader>
+                              <h4 className="font-semibold">
+                                Health & Performance
+                              </h4>
+                            </CardHeader>
+                            <CardBody className="space-y-4">
+                              <div>
+                                <div className="flex justify-between mb-2">
+                                  <span>Health Score</span>
+                                  <span className="font-medium">
+                                    {getConditionScore(
+                                      selectedEquipment
+                                    ).toFixed(1)}
+                                    %
+                                  </span>
+                                </div>
+                                <Progress
+                                  aria-label="Equipment health score"
+                                  value={getConditionScore(selectedEquipment)}
+                                  color={
+                                    getHealthStatus(
+                                      getConditionScore(selectedEquipment)
+                                    ).color as any
+                                  }
+                                />
+                              </div>
+
+                              {selectedEquipment.power_rating_kw && (
+                                <div className="flex justify-between">
+                                  <span className="text-default-600">
+                                    Power Rating:
+                                  </span>
+                                  <span className="font-medium">
+                                    {selectedEquipment.power_rating_kw} kW
+                                  </span>
+                                </div>
+                              )}
+
+                              {selectedEquipment.voltage_rating && (
+                                <div className="flex justify-between">
+                                  <span className="text-default-600">
+                                    Voltage Rating:
+                                  </span>
+                                  <span className="font-medium">
+                                    {selectedEquipment.voltage_rating} V
+                                  </span>
+                                </div>
+                              )}
+
+                              {selectedEquipment.current_rating_a && (
+                                <div className="flex justify-between">
+                                  <span className="text-default-600">
+                                    Current Rating:
+                                  </span>
+                                  <span className="font-medium">
+                                    {selectedEquipment.current_rating_a} A
+                                  </span>
+                                </div>
+                              )}
+                            </CardBody>
+                          </Card>
+                        </div>
+
+                        {equipmentDetails.loading && (
+                          <Card>
+                            <CardBody className="text-center py-8">
+                              <Spinner size="lg" />
+                              <p className="mt-4 text-default-500">
+                                Loading additional details...
+                              </p>
+                            </CardBody>
+                          </Card>
+                        )}
+                      </div>
+                    </Tab>
+
+                    <Tab
+                      key="alerts"
+                      title={
+                        <div className="flex items-center">
+                          <AlertTriangle className="w-4 h-4 mr-2" />
+                          Alerts
+                          {equipmentDetails.alerts.length > 0 && (
+                            <Badge
+                              content={equipmentDetails.alerts.length}
+                              color="danger"
+                              size="sm"
+                              className="ml-2"
+                            >
+                              <span className="w-2 h-2" />
+                            </Badge>
+                          )}
+                        </div>
+                      }
+                    >
+                      <div className="space-y-4">
+                        {equipmentDetails.loading && (
+                          <Card>
+                            <CardBody className="text-center py-8">
+                              <Spinner size="lg" />
+                              <p className="mt-4 text-default-500">
+                                Loading alerts...
+                              </p>
+                            </CardBody>
+                          </Card>
+                        )}
+
+                        {equipmentDetails.alerts.length > 0 ? (
+                          equipmentDetails.alerts.map((alert) => (
+                            <Card
+                              key={alert.id}
+                              className={`border-l-4 ${
+                                alert.severity === "critical"
+                                  ? "border-l-danger"
+                                  : alert.severity === "high"
+                                    ? "border-l-warning"
+                                    : "border-l-primary"
+                              }`}
+                            >
+                              <CardBody>
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <Chip
+                                        color={
+                                          alert.severity === "critical"
+                                            ? "danger"
+                                            : alert.severity === "high"
+                                              ? "warning"
+                                              : "primary"
+                                        }
+                                        size="sm"
+                                      >
+                                        {alert.severity}
+                                      </Chip>
+                                      <Chip
+                                        color={
+                                          alert.status === "active"
+                                            ? "danger"
+                                            : "success"
+                                        }
+                                        size="sm"
+                                        variant="flat"
+                                      >
+                                        {alert.status}
+                                      </Chip>
+                                    </div>
+                                    <h5 className="font-semibold mt-2">
+                                      {alert.title}
+                                    </h5>
+                                    <p className="text-default-600 text-sm mt-1">
+                                      {alert.message}
+                                    </p>
+                                    <div className="text-xs text-default-500 mt-2">
+                                      {new Date(
+                                        alert.created_at
+                                      ).toLocaleString()}
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardBody>
+                            </Card>
+                          ))
+                        ) : (
+                          <Card>
+                            <CardBody className="text-center py-8">
+                              <CheckCircle className="w-12 h-12 text-success mx-auto mb-3" />
+                              <h4 className="font-medium text-success">
+                                No Active Alerts
+                              </h4>
+                              <p className="text-default-500 text-sm">
+                                This equipment is operating normally
+                              </p>
+                            </CardBody>
+                          </Card>
+                        )}
+                      </div>
+                    </Tab>
+                  </Tabs>
+                )}
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>
+                  Close
+                </Button>
+                <Button
+                  color="primary"
+                  startContent={<FileText className="w-4 h-4" />}
+                  onPress={() => {
+                    console.log(
+                      "Generate equipment report for:",
+                      selectedEquipment?.id
+                    );
+                  }}
+                >
+                  Generate Report
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* Maintenance Modal */}
+      <Modal
+        isOpen={isMaintenanceOpen}
+        onOpenChange={onMaintenanceClose}
+        size="3xl"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>
+                <div className="flex items-center">
+                  <Wrench className="w-5 h-5 mr-2" />
+                  Maintenance - {selectedEquipment?.name}
+                </div>
+              </ModalHeader>
+              <ModalBody>
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <h4 className="font-semibold">Log New Maintenance</h4>
+                    </CardHeader>
+                    <CardBody className="space-y-4">
+                      <Select
+                        label="Maintenance Type"
+                        selectedKeys={[maintenanceFormData.maintenance_type]}
+                        onSelectionChange={(keys) => {
+                          const selectedKey =
+                            keys === "all"
+                              ? "preventive"
+                              : (Array.from(keys)[0] as string);
+                          setMaintenanceFormData((prev) => ({
+                            ...prev,
+                            maintenance_type: selectedKey as any,
+                          }));
+                        }}
+                      >
+                        <SelectItem key="preventive">Preventive</SelectItem>
+                        <SelectItem key="corrective">Corrective</SelectItem>
+                        <SelectItem key="emergency">Emergency</SelectItem>
+                        <SelectItem key="inspection">Inspection</SelectItem>
+                      </Select>
+
+                      <Input
+                        label="Scheduled Date"
+                        type="date"
+                        value={maintenanceFormData.scheduled_date}
+                        onChange={(e) =>
+                          setMaintenanceFormData((prev) => ({
+                            ...prev,
+                            scheduled_date: e.target.value,
+                          }))
+                        }
+                      />
+
+                      <Textarea
+                        label="Description"
+                        placeholder="Describe the maintenance work to be performed"
+                        value={maintenanceFormData.description}
+                        onChange={(e) =>
+                          setMaintenanceFormData((prev) => ({
+                            ...prev,
+                            description: e.target.value,
+                          }))
+                        }
+                        minRows={3}
+                      />
+
+                      <Textarea
+                        label="Notes"
+                        placeholder="Additional notes or special instructions"
+                        value={maintenanceFormData.notes}
+                        onChange={(e) =>
+                          setMaintenanceFormData((prev) => ({
+                            ...prev,
+                            notes: e.target.value,
+                          }))
+                        }
+                        minRows={2}
+                      />
+
+                      <Button
+                        color="primary"
+                        startContent={<Plus className="w-4 h-4" />}
+                        onPress={handleLogMaintenance}
+                        isLoading={submitting}
+                      >
+                        Log Maintenance
+                      </Button>
+                    </CardBody>
+                  </Card>
+
+                  {equipmentDetails.loading && (
+                    <Card>
+                      <CardBody className="text-center py-8">
+                        <Spinner size="lg" />
+                        <p className="mt-4 text-default-500">
+                          Loading maintenance history...
+                        </p>
+                      </CardBody>
+                    </Card>
+                  )}
+
+                  {equipmentDetails.maintenanceHistory.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <h4 className="font-semibold">Maintenance History</h4>
+                      </CardHeader>
+                      <CardBody>
+                        <div className="space-y-3">
+                          {equipmentDetails.maintenanceHistory.map(
+                            (maintenance, index) => (
+                              <div
+                                key={index}
+                                className="flex justify-between items-start p-3 bg-default-50 rounded-lg"
+                              >
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Chip
+                                      color={
+                                        maintenance.maintenance_type ===
+                                        "emergency"
+                                          ? "danger"
+                                          : maintenance.maintenance_type ===
+                                              "corrective"
+                                            ? "warning"
+                                            : "primary"
+                                      }
+                                      size="sm"
+                                    >
+                                      {maintenance.maintenance_type}
+                                    </Chip>
+                                    <Chip
+                                      color={
+                                        maintenance.status === "completed"
+                                          ? "success"
+                                          : maintenance.status === "in_progress"
+                                            ? "warning"
+                                            : "default"
+                                      }
+                                      size="sm"
+                                      variant="dot"
+                                    >
+                                      {maintenance.status}
+                                    </Chip>
+                                  </div>
+                                  <div className="font-medium">
+                                    {maintenance.description}
+                                  </div>
+                                  <div className="text-sm text-default-600">
+                                    {maintenance.scheduled_date && (
+                                      <span>
+                                        Scheduled:{" "}
+                                        {new Date(
+                                          maintenance.scheduled_date
+                                        ).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    {maintenance.completed_date && (
+                                      <span>
+                                        {" "}
+                                        • Completed:{" "}
+                                        {new Date(
+                                          maintenance.completed_date
+                                        ).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {maintenance.notes && (
+                                    <div className="text-xs text-default-500 mt-1">
+                                      Notes: {maintenance.notes}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-right ml-4">
+                                  {maintenance.cost && (
+                                    <div className="text-sm font-medium">
+                                      ₱{maintenance.cost.toLocaleString()}
+                                    </div>
+                                  )}
+                                  {maintenance.downtime_minutes && (
+                                    <div className="text-xs text-default-500">
+                                      {maintenance.downtime_minutes} min
+                                      downtime
+                                    </div>
+                                  )}
+                                  {maintenance.duration_minutes && (
+                                    <div className="text-xs text-default-400">
+                                      {maintenance.duration_minutes} min
+                                      duration
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </CardBody>
+                    </Card>
+                  )}
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>
+                  Close
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* Alerts Modal */}
+      <Modal
+        isOpen={isAlertsOpen}
+        onOpenChange={onAlertsClose}
+        size="3xl"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>
+                <div className="flex items-center">
+                  <AlertTriangle className="w-5 h-5 mr-2" />
+                  Equipment Alerts - {selectedEquipment?.name}
+                  {equipmentDetails.alerts.length > 0 && (
+                    <Badge
+                      content={equipmentDetails.alerts.length}
+                      color="danger"
+                      size="sm"
+                      className="ml-2"
+                    >
+                      <span className="w-2 h-2" />
+                    </Badge>
+                  )}
+                  {equipmentDetails.loading && (
+                    <Spinner size="sm" className="ml-2" />
+                  )}
+                </div>
+              </ModalHeader>
+              <ModalBody>
+                <div className="space-y-4">
+                  {equipmentDetails.loading && (
+                    <Card>
+                      <CardBody className="text-center py-8">
+                        <Spinner size="lg" />
+                        <p className="mt-4 text-default-500">
+                          Loading alerts...
+                        </p>
+                      </CardBody>
+                    </Card>
+                  )}
+
+                  {equipmentDetails.alerts.length > 0 ? (
+                    equipmentDetails.alerts.map((alert) => (
+                      <Card
+                        key={alert.id}
+                        className={`border-l-4 ${
+                          alert.severity === "critical"
+                            ? "border-l-danger"
+                            : alert.severity === "high"
+                              ? "border-l-warning"
+                              : "border-l-primary"
+                        }`}
+                      >
+                        <CardBody>
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Chip
+                                  color={
+                                    alert.severity === "critical"
+                                      ? "danger"
+                                      : alert.severity === "high"
+                                        ? "warning"
+                                        : "primary"
+                                  }
+                                  size="sm"
+                                >
+                                  {alert.severity}
+                                </Chip>
+                                <Chip
+                                  color={
+                                    alert.status === "active"
+                                      ? "danger"
+                                      : "success"
+                                  }
+                                  size="sm"
+                                  variant="flat"
+                                >
+                                  {alert.status}
+                                </Chip>
+                                <Chip color="default" size="sm" variant="flat">
+                                  {alert.type}
+                                </Chip>
+                              </div>
+                              <h5 className="font-semibold text-lg">
+                                {alert.title}
+                              </h5>
+                              <p className="text-default-600 mt-1">
+                                {alert.message}
+                              </p>
+                              {alert.description && (
+                                <p className="text-default-500 text-sm mt-2">
+                                  {alert.description}
+                                </p>
+                              )}
+                              <div className="flex items-center gap-4 mt-3 text-sm text-default-500">
+                                <span>
+                                  Created:{" "}
+                                  {new Date(alert.created_at).toLocaleString()}
+                                </span>
+                                {alert.acknowledged_at && (
+                                  <span>
+                                    Acknowledged:{" "}
+                                    {new Date(
+                                      alert.acknowledged_at
+                                    ).toLocaleString()}
+                                  </span>
+                                )}
+                                {alert.resolved_at && (
+                                  <span>
+                                    Resolved:{" "}
+                                    {new Date(
+                                      alert.resolved_at
+                                    ).toLocaleString()}
+                                  </span>
+                                )}
+                              </div>
+                              {alert.estimated_cost_impact && (
+                                <div className="mt-2">
+                                  <span className="text-sm text-warning">
+                                    Estimated Cost Impact: ₱
+                                    {alert.estimated_cost_impact.toLocaleString()}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-4">
+                              {alert.status === "active" && (
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    color="warning"
+                                    variant="flat"
+                                    startContent={
+                                      <CheckCircle className="w-4 h-4" />
+                                    }
+                                    onPress={async () => {
+                                      try {
+                                        await alertsAPI.acknowledge(alert.id);
+                                        // Refresh alerts
+                                        const response = await alertsAPI.getAll(
+                                          {
+                                            equipment_id: selectedEquipment!.id,
+                                            limit: 20,
+                                          }
+                                        );
+                                        if (response.data?.success) {
+                                          setEquipmentDetails((prev) => ({
+                                            ...prev,
+                                            alerts: safeArray<Alert>(
+                                              response.data.data
+                                            ),
+                                          }));
+                                        }
+                                      } catch (error) {
+                                        console.error(
+                                          "Failed to acknowledge alert:",
+                                          error
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Acknowledge
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    color="success"
+                                    startContent={
+                                      <CheckCircle className="w-4 h-4" />
+                                    }
+                                    onPress={async () => {
+                                      try {
+                                        await alertsAPI.resolve(alert.id);
+                                        // Refresh alerts
+                                        const response = await alertsAPI.getAll(
+                                          {
+                                            equipment_id: selectedEquipment!.id,
+                                            limit: 20,
+                                          }
+                                        );
+                                        if (response.data?.success) {
+                                          setEquipmentDetails((prev) => ({
+                                            ...prev,
+                                            alerts: safeArray<Alert>(
+                                              response.data.data
+                                            ),
+                                          }));
+                                        }
+                                      } catch (error) {
+                                        console.error(
+                                          "Failed to resolve alert:",
+                                          error
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Resolve
+                                  </Button>
+                                </div>
+                              )}
+
       {/* Equipment Table */}
       <Card>
         <CardBody className="p-0">
-          <Table aria-label="Equipment table with maintenance insights">
+          <Table aria-label="Equipment table">
             <TableHeader>
               <TableColumn>Equipment</TableColumn>
               <TableColumn>Type & Building</TableColumn>
               <TableColumn>Health Status</TableColumn>
-              <TableColumn>Maintenance</TableColumn>
-              <TableColumn>Performance</TableColumn>
+              <TableColumn>Specifications</TableColumn>
               <TableColumn>Alerts</TableColumn>
               <TableColumn>Actions</TableColumn>
             </TableHeader>
             <TableBody emptyContent="No equipment found. Try adjusting your filters or add new equipment.">
               {equipment.map((item) => {
-                const maintenanceUrgency = getMaintenanceUrgency(item);
-                const healthStatus = getHealthStatusInfo(
-                  getEquipmentConditionScore(item)
-                );
+                const conditionScore = getConditionScore(item);
+                const healthStatus = getHealthStatus(conditionScore);
                 const typeInfo = getTypeInfo(item.equipment_type);
                 const statusInfo = getStatusInfo(item.status);
                 const equipmentAlerts = getEquipmentAlerts(item.id);
@@ -1453,6 +2486,8 @@ export default function EquipmentPage() {
                           <div className="flex items-center text-xs text-default-500">
                             <MapPin className="w-3 h-3 mr-1" />
                             {item.location}
+                            {item.floor && ` (Floor ${item.floor})`}
+                            {item.room && ` - ${item.room}`}
                           </div>
                         )}
                       </div>
@@ -1462,7 +2497,7 @@ export default function EquipmentPage() {
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium">
-                            {getEquipmentConditionScore(item).toFixed(1)}%
+                            {conditionScore.toFixed(1)}%
                           </span>
                           <Chip
                             color={healthStatus.color as any}
@@ -1473,8 +2508,8 @@ export default function EquipmentPage() {
                           </Chip>
                         </div>
                         <Progress
-                          aria-label={`Equipment health: ${getEquipmentConditionScore(item).toFixed(1)}%`}
-                          value={getEquipmentConditionScore(item)}
+                          aria-label={`Equipment health: ${conditionScore.toFixed(1)}%`}
+                          value={conditionScore}
                           color={healthStatus.color as any}
                           size="sm"
                         />
@@ -1489,92 +2524,28 @@ export default function EquipmentPage() {
                     </TableCell>
 
                     <TableCell>
-                      <div className="space-y-2">
-                        <Chip
-                          color={maintenanceUrgency.color as any}
-                          size="sm"
-                          variant="flat"
-                          startContent={
-                            maintenanceUrgency.level === "overdue" ? (
-                              <AlertTriangle className="w-3 h-3" />
-                            ) : (
-                              <Clock className="w-3 h-3" />
-                            )
-                          }
-                        >
-                          {maintenanceUrgency.level === "overdue"
-                            ? `${maintenanceUrgency.days}d overdue`
-                            : maintenanceUrgency.level === "none"
-                              ? "Current"
-                              : `${maintenanceUrgency.days}d to go`}
-                        </Chip>
-                        {getNextMaintenanceDate(item) && (
-                          <div className="text-xs text-default-500">
-                            Due:{" "}
-                            {new Date(
-                              getNextMaintenanceDate(item)!
-                            ).toLocaleDateString()}
-                          </div>
-                        )}
-                        {getMaintenanceRiskLevel(item) && (
-                          <div className="text-xs">
-                            Risk:{" "}
-                            <span
-                              className={`font-medium ${
-                                getMaintenanceRiskLevel(item) === "high"
-                                  ? "text-danger"
-                                  : getMaintenanceRiskLevel(item) === "medium"
-                                    ? "text-warning"
-                                    : "text-success"
-                              }`}
-                            >
-                              {getMaintenanceRiskLevel(item)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
                       <div className="space-y-1">
-                        {item.performance_metrics ? (
-                          <>
-                            <div className="flex items-center text-xs">
-                              <Zap className="w-3 h-3 mr-1 text-primary" />
-                              <span>
-                                {item.performance_metrics.efficiency_percentage?.toFixed(
-                                  1
-                                ) || "N/A"}
-                                % efficiency
-                              </span>
-                            </div>
-                            <div className="flex items-center text-xs">
-                              <CheckCircle className="w-3 h-3 mr-1 text-success" />
-                              <span>
-                                {item.performance_metrics.availability_percentage?.toFixed(
-                                  1
-                                ) || "N/A"}
-                                % uptime
-                              </span>
-                            </div>
-                            <div className="flex items-center text-xs">
-                              <Activity className="w-3 h-3 mr-1 text-warning" />
-                              <span>
-                                {item.performance_metrics.energy_consumption_kwh_day?.toFixed(
-                                  1
-                                ) || "0"}{" "}
-                                kWh/day
-                              </span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-xs text-default-500">
-                            Performance data not available
+                        {item.power_rating_kw && (
+                          <div className="flex items-center text-xs">
+                            <Zap className="w-3 h-3 mr-1 text-primary" />
+                            <span>{item.power_rating_kw} kW</span>
                           </div>
                         )}
-                        {item.power_rating_kw && (
+                        {item.voltage_rating && (
+                          <div className="flex items-center text-xs">
+                            <Plug className="w-3 h-3 mr-1 text-warning" />
+                            <span>{item.voltage_rating} V</span>
+                          </div>
+                        )}
+                        {item.current_rating_a && (
+                          <div className="flex items-center text-xs">
+                            <Activity className="w-3 h-3 mr-1 text-success" />
+                            <span>{item.current_rating_a} A</span>
+                          </div>
+                        )}
+                        {item.serial_number && (
                           <div className="text-xs text-default-500">
-                            {item.power_rating_kw} kW rated
+                            S/N: {item.serial_number}
                           </div>
                         )}
                       </div>
@@ -1679,7 +2650,7 @@ export default function EquipmentPage() {
             </TableBody>
           </Table>
 
-          {/* Enhanced Pagination */}
+          {/* Pagination */}
           {pagination.total_pages > 1 && (
             <div className="flex justify-between items-center p-4">
               <div className="text-sm text-default-500">
@@ -1704,1889 +2675,3 @@ export default function EquipmentPage() {
           )}
         </CardBody>
       </Card>
-
-      {/* Create/Edit Equipment Modal */}
-      <Modal
-        isOpen={isCreateOpen || isEditOpen}
-        onOpenChange={isCreateOpen ? onCreateClose : onEditClose}
-        size="3xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader>
-                <div className="flex items-center">
-                  <Settings className="w-5 h-5 mr-2" />
-                  {isCreateOpen ? "Add New Equipment" : "Edit Equipment"}
-                </div>
-              </ModalHeader>
-              <ModalBody className="space-y-4">
-                {/* Show building loading state if needed */}
-                {buildingsLoading && (
-                  <div className="flex items-center p-4 bg-primary-50 rounded-lg">
-                    <Spinner size="sm" color="primary" className="mr-2" />
-                    <span className="text-primary">Loading buildings...</span>
-                  </div>
-                )}
-
-                {/* Show warning if no buildings */}
-                {buildings.length === 0 && !buildingsLoading && (
-                  <div className="flex items-center p-4 bg-warning-50 rounded-lg">
-                    <AlertTriangle className="w-5 h-5 mr-2 text-warning" />
-                    <span className="text-warning">
-                      No buildings available. Please add buildings first.
-                    </span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Equipment Name"
-                    placeholder="Enter equipment name"
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData((prev) => ({ ...prev, name: e.target.value }))
-                    }
-                    errorMessage={formErrors.name}
-                    isInvalid={!!formErrors.name}
-                    isRequired
-                  />
-
-                  <Select
-                    label="Building"
-                    placeholder={
-                      buildings.length > 0
-                        ? "Select building"
-                        : "No buildings available"
-                    }
-                    selectedKeys={
-                      formData.building_id ? [formData.building_id] : []
-                    }
-                    onSelectionChange={handleFormBuildingChange}
-                    errorMessage={formErrors.building_id}
-                    isInvalid={!!formErrors.building_id}
-                    isRequired
-                    isDisabled={buildings.length === 0}
-                    isLoading={buildingsLoading}
-                  >
-                    {buildings.map((building) => (
-                      <SelectItem key={building.id.toString()}>
-                        {building.name} ({building.code})
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Select
-                    label="Equipment Type"
-                    selectedKeys={[formData.equipment_type]}
-                    onSelectionChange={handleFormEquipmentTypeChange}
-                    isRequired
-                  >
-                    {equipmentTypes.map((type) => (
-                      <SelectItem key={type.key}>
-                        {type.icon} {type.label}
-                      </SelectItem>
-                    ))}
-                  </Select>
-
-                  <Select
-                    label="Maintenance Schedule"
-                    selectedKeys={[formData.maintenance_schedule]}
-                    onSelectionChange={handleFormMaintenanceScheduleChange}
-                  >
-                    <SelectItem key="weekly">Weekly</SelectItem>
-                    <SelectItem key="monthly">Monthly</SelectItem>
-                    <SelectItem key="quarterly">Quarterly</SelectItem>
-                    <SelectItem key="annually">Annually</SelectItem>
-                  </Select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Manufacturer"
-                    placeholder="Enter manufacturer"
-                    value={formData.manufacturer}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        manufacturer: e.target.value,
-                      }))
-                    }
-                    errorMessage={formErrors.manufacturer}
-                    isInvalid={!!formErrors.manufacturer}
-                    isRequired
-                  />
-
-                  <Input
-                    label="Model"
-                    placeholder="Enter model"
-                    value={formData.model}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        model: e.target.value,
-                      }))
-                    }
-                    errorMessage={formErrors.model}
-                    isInvalid={!!formErrors.model}
-                    isRequired
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Power Rating (kW)"
-                    placeholder="0.0"
-                    type="number"
-                    step="0.1"
-                    value={formData.power_rating_kw}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        power_rating_kw: e.target.value,
-                      }))
-                    }
-                    errorMessage={formErrors.power_rating_kw}
-                    isInvalid={!!formErrors.power_rating_kw}
-                    isRequired
-                  />
-
-                  <Input
-                    label="Voltage Rating (V)"
-                    placeholder="220"
-                    type="number"
-                    value={formData.voltage_rating}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        voltage_rating: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Installation Date"
-                    type="date"
-                    value={formData.installation_date}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        installation_date: e.target.value,
-                      }))
-                    }
-                  />
-
-                  <Input
-                    label="Location"
-                    placeholder="Enter location within building"
-                    value={formData.location}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        location: e.target.value,
-                      }))
-                    }
-                    errorMessage={formErrors.location}
-                    isInvalid={!!formErrors.location}
-                    isRequired
-                  />
-                </div>
-
-                <Textarea
-                  label="Notes"
-                  placeholder="Additional notes or specifications"
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, notes: e.target.value }))
-                  }
-                  minRows={3}
-                />
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  Cancel
-                </Button>
-                <Button
-                  color="primary"
-                  onPress={isCreateOpen ? handleCreate : handleEdit}
-                  isLoading={submitting}
-                  startContent={
-                    isCreateOpen ? (
-                      <Plus className="w-4 h-4" />
-                    ) : (
-                      <Edit className="w-4 h-4" />
-                    )
-                  }
-                  isDisabled={buildings.length === 0 && !buildingsLoading}
-                >
-                  {isCreateOpen ? "Create Equipment" : "Update Equipment"}
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* Equipment Details Modal */}
-      <Modal
-        isOpen={isViewOpen}
-        onOpenChange={onViewClose}
-        size="5xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader>
-                <div className="flex items-center">
-                  <Eye className="w-5 h-5 mr-2" />
-                  {selectedEquipment?.name} - Comprehensive Details
-                  {loadingDetails && <Spinner size="sm" className="ml-2" />}
-                </div>
-              </ModalHeader>
-              <ModalBody>
-                {selectedEquipment && (
-                  <Tabs aria-label="Equipment details tabs" color="primary">
-                    <Tab
-                      key="overview"
-                      title={
-                        <div className="flex items-center">
-                          <Cpu className="w-4 h-4 mr-2" />
-                          Overview
-                        </div>
-                      }
-                    >
-                      <div className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <Card>
-                            <CardHeader>
-                              <h4 className="font-semibold">
-                                Basic Information
-                              </h4>
-                            </CardHeader>
-                            <CardBody className="space-y-3">
-                              <div className="flex justify-between">
-                                <span className="text-default-600">Code:</span>
-                                <span className="font-medium">
-                                  {selectedEquipment.code ||
-                                    `EQ-${selectedEquipment.id.toString().padStart(4, "0")}`}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">Type:</span>
-                                <Chip
-                                  color={
-                                    getTypeInfo(
-                                      selectedEquipment.equipment_type
-                                    ).color as any
-                                  }
-                                  size="sm"
-                                >
-                                  {
-                                    getTypeInfo(
-                                      selectedEquipment.equipment_type
-                                    ).label
-                                  }
-                                </Chip>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">
-                                  Status:
-                                </span>
-                                <Chip
-                                  color={
-                                    getStatusInfo(selectedEquipment.status)
-                                      .color as any
-                                  }
-                                  size="sm"
-                                >
-                                  {
-                                    getStatusInfo(selectedEquipment.status)
-                                      .label
-                                  }
-                                </Chip>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">
-                                  Manufacturer:
-                                </span>
-                                <span className="font-medium">
-                                  {selectedEquipment.manufacturer}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">Model:</span>
-                                <span className="font-medium">
-                                  {selectedEquipment.model}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">
-                                  Power Rating:
-                                </span>
-                                <span className="font-medium">
-                                  {selectedEquipment.power_rating_kw} kW
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">
-                                  Location:
-                                </span>
-                                <span className="font-medium">
-                                  {selectedEquipment.location}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-default-600">Age:</span>
-                                <span className="font-medium">
-                                  {selectedEquipment.installation_date
-                                    ? `${getEquipmentAge(selectedEquipment).toFixed(1)} years`
-                                    : "N/A"}
-                                </span>
-                              </div>
-                            </CardBody>
-                          </Card>
-
-                          <Card>
-                            <CardHeader>
-                              <h4 className="font-semibold">
-                                Health & Performance
-                              </h4>
-                            </CardHeader>
-                            <CardBody className="space-y-4">
-                              <div>
-                                <div className="flex justify-between mb-2">
-                                  <span>Health Score</span>
-                                  <span className="font-medium">
-                                    {getEquipmentConditionScore(
-                                      selectedEquipment
-                                    ).toFixed(1)}
-                                    %
-                                  </span>
-                                </div>
-                                <Progress
-                                  aria-label="Equipment health score"
-                                  value={getEquipmentConditionScore(
-                                    selectedEquipment
-                                  )}
-                                  color={
-                                    getHealthStatusInfo(
-                                      getEquipmentConditionScore(
-                                        selectedEquipment
-                                      )
-                                    ).color as any
-                                  }
-                                />
-                              </div>
-
-                              {selectedEquipment.performance_metrics && (
-                                <>
-                                  <div>
-                                    <div className="flex justify-between mb-2">
-                                      <span>Efficiency</span>
-                                      <span className="font-medium">
-                                        {selectedEquipment.performance_metrics.efficiency_percentage?.toFixed(
-                                          1
-                                        ) || "N/A"}
-                                        %
-                                      </span>
-                                    </div>
-                                    <Progress
-                                      aria-label="Equipment efficiency"
-                                      value={
-                                        selectedEquipment.performance_metrics
-                                          .efficiency_percentage || 0
-                                      }
-                                      color="primary"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex justify-between mb-2">
-                                      <span>Availability</span>
-                                      <span className="font-medium">
-                                        {selectedEquipment.performance_metrics.availability_percentage?.toFixed(
-                                          1
-                                        ) || "N/A"}
-                                        %
-                                      </span>
-                                    </div>
-                                    <Progress
-                                      aria-label="Equipment availability"
-                                      value={
-                                        selectedEquipment.performance_metrics
-                                          .availability_percentage || 0
-                                      }
-                                      color="success"
-                                    />
-                                  </div>
-                                </>
-                              )}
-                            </CardBody>
-                          </Card>
-                        </div>
-
-                        {loadingDetails && (
-                          <Card>
-                            <CardBody className="text-center py-8">
-                              <Spinner size="lg" />
-                              <p className="mt-4 text-default-500">
-                                Loading additional details...
-                              </p>
-                            </CardBody>
-                          </Card>
-                        )}
-
-                        {equipmentDetails && (
-                          <Card>
-                            <CardHeader>
-                              <h4 className="font-semibold">Recent Activity</h4>
-                            </CardHeader>
-                            <CardBody>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="text-center">
-                                  <div className="text-2xl font-bold text-primary">
-                                    {equipmentDetails.performanceMetrics
-                                      ?.totalMaintenanceCount || 0}
-                                  </div>
-                                  <div className="text-sm text-default-600">
-                                    Total Maintenance
-                                  </div>
-                                </div>
-                                <div className="text-center">
-                                  <div className="text-2xl font-bold text-success">
-                                    {equipmentDetails.performanceMetrics?.uptimePercentage?.toFixed(
-                                      1
-                                    ) || "N/A"}
-                                    %
-                                  </div>
-                                  <div className="text-sm text-default-600">
-                                    Uptime
-                                  </div>
-                                </div>
-                                <div className="text-center">
-                                  <div className="text-2xl font-bold text-warning">
-                                    {equipmentDetails.performanceMetrics?.reliabilityScore?.toFixed(
-                                      1
-                                    ) || "N/A"}
-                                  </div>
-                                  <div className="text-sm text-default-600">
-                                    Reliability Score
-                                  </div>
-                                </div>
-                              </div>
-                            </CardBody>
-                          </Card>
-                        )}
-                      </div>
-                    </Tab>
-
-                    <Tab
-                      key="maintenance"
-                      title={
-                        <div className="flex items-center">
-                          <Wrench className="w-4 h-4 mr-2" />
-                          Maintenance
-                        </div>
-                      }
-                    >
-                      <div className="space-y-4">
-                        <Card>
-                          <CardHeader>
-                            <h4 className="font-semibold">
-                              Maintenance Schedule
-                            </h4>
-                          </CardHeader>
-                          <CardBody>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <span className="text-default-600">
-                                  Last Maintenance:
-                                </span>
-                                <div className="font-medium">
-                                  {selectedEquipment.last_maintenance_date ||
-                                  selectedEquipment.maintenance_info
-                                    ?.last_maintenance
-                                    ? new Date(
-                                        selectedEquipment.last_maintenance_date ||
-                                          selectedEquipment.maintenance_info
-                                            .last_maintenance
-                                      ).toLocaleDateString()
-                                    : "No record"}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-default-600">
-                                  Next Due:
-                                </span>
-                                <div className="font-medium">
-                                  {getNextMaintenanceDate(selectedEquipment)
-                                    ? new Date(
-                                        getNextMaintenanceDate(
-                                          selectedEquipment
-                                        )!
-                                      ).toLocaleDateString()
-                                    : "Not scheduled"}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-default-600">
-                                  Predicted Date:
-                                </span>
-                                <div className="font-medium">
-                                  {selectedEquipment.predicted_maintenance_date
-                                    ? new Date(
-                                        selectedEquipment.predicted_maintenance_date
-                                      ).toLocaleDateString()
-                                    : "Not available"}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-default-600">
-                                  Risk Level:
-                                </span>
-                                <Chip
-                                  color={
-                                    getMaintenanceRiskLevel(
-                                      selectedEquipment
-                                    ) === "high"
-                                      ? "danger"
-                                      : getMaintenanceRiskLevel(
-                                            selectedEquipment
-                                          ) === "medium"
-                                        ? "warning"
-                                        : "success"
-                                  }
-                                  size="sm"
-                                >
-                                  {getMaintenanceRiskLevel(selectedEquipment)}
-                                </Chip>
-                              </div>
-                            </div>
-                          </CardBody>
-                        </Card>
-
-                        {loadingDetails && (
-                          <Card>
-                            <CardBody className="text-center py-8">
-                              <Spinner size="lg" />
-                              <p className="mt-4 text-default-500">
-                                Loading maintenance history...
-                              </p>
-                            </CardBody>
-                          </Card>
-                        )}
-
-                        {maintenanceHistory.length > 0 && (
-                          <Card>
-                            <CardHeader>
-                              <h4 className="font-semibold">
-                                Recent Maintenance History
-                              </h4>
-                            </CardHeader>
-                            <CardBody>
-                              <div className="space-y-3">
-                                {maintenanceHistory
-                                  .slice(0, 5)
-                                  .map((maintenance, index) => (
-                                    <div
-                                      key={index}
-                                      className="flex justify-between items-center p-3 bg-default-50 rounded-lg"
-                                    >
-                                      <div>
-                                        <div className="font-medium">
-                                          {maintenance.maintenance_type ||
-                                            "Maintenance"}
-                                        </div>
-                                        <div className="text-sm text-default-600">
-                                          {maintenance.completed_date
-                                            ? new Date(
-                                                maintenance.completed_date
-                                              ).toLocaleDateString()
-                                            : "Pending"}
-                                        </div>
-                                        <div className="text-xs text-default-500">
-                                          {maintenance.description}
-                                        </div>
-                                      </div>
-                                      <div className="text-right">
-                                        <div className="text-sm font-medium">
-                                          ₱
-                                          {maintenance.cost?.toLocaleString() ||
-                                            "0"}
-                                        </div>
-                                        <div className="text-xs text-default-500">
-                                          {maintenance.downtime_minutes || 0}{" "}
-                                          min downtime
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                              </div>
-                            </CardBody>
-                          </Card>
-                        )}
-                      </div>
-                    </Tab>
-
-                    <Tab
-                      key="alerts"
-                      title={
-                        <div className="flex items-center">
-                          <AlertTriangle className="w-4 h-4 mr-2" />
-                          Alerts
-                          {equipmentAlerts.length > 0 && (
-                            <Badge
-                              content={equipmentAlerts.length}
-                              color="danger"
-                              size="sm"
-                              className="ml-2"
-                            >
-                              <span className="w-2 h-2" />
-                            </Badge>
-                          )}
-                        </div>
-                      }
-                    >
-                      <div className="space-y-4">
-                        {loadingDetails && (
-                          <Card>
-                            <CardBody className="text-center py-8">
-                              <Spinner size="lg" />
-                              <p className="mt-4 text-default-500">
-                                Loading alerts...
-                              </p>
-                            </CardBody>
-                          </Card>
-                        )}
-
-                        {equipmentAlerts.length > 0 ? (
-                          equipmentAlerts.map((alert) => (
-                            <Card
-                              key={alert.id}
-                              className={`border-l-4 ${
-                                alert.severity === "critical"
-                                  ? "border-l-danger"
-                                  : alert.severity === "high"
-                                    ? "border-l-warning"
-                                    : alert.severity === "medium"
-                                      ? "border-l-primary"
-                                      : "border-l-default"
-                              }`}
-                            >
-                              <CardBody>
-                                <div className="flex justify-between items-start">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <Chip
-                                        color={
-                                          alert.severity === "critical"
-                                            ? "danger"
-                                            : alert.severity === "high"
-                                              ? "warning"
-                                              : alert.severity === "medium"
-                                                ? "primary"
-                                                : "default"
-                                        }
-                                        size="sm"
-                                      >
-                                        {alert.severity}
-                                      </Chip>
-                                      <Chip
-                                        color={
-                                          alert.status === "active"
-                                            ? "danger"
-                                            : "success"
-                                        }
-                                        size="sm"
-                                        variant="flat"
-                                      >
-                                        {alert.status}
-                                      </Chip>
-                                    </div>
-                                    <h5 className="font-semibold mt-2">
-                                      {alert.title}
-                                    </h5>
-                                    <p className="text-default-600 text-sm mt-1">
-                                      {alert.message}
-                                    </p>
-                                    <div className="text-xs text-default-500 mt-2">
-                                      {new Date(
-                                        alert.created_at
-                                      ).toLocaleString()}
-                                    </div>
-                                  </div>
-                                </div>
-                              </CardBody>
-                            </Card>
-                          ))
-                        ) : (
-                          <Card>
-                            <CardBody className="text-center py-8">
-                              <CheckCircle className="w-12 h-12 text-success mx-auto mb-3" />
-                              <h4 className="font-medium text-success">
-                                No Active Alerts
-                              </h4>
-                              <p className="text-default-500 text-sm">
-                                This equipment is operating normally
-                              </p>
-                            </CardBody>
-                          </Card>
-                        )}
-                      </div>
-                    </Tab>
-
-                    <Tab
-                      key="analytics"
-                      title={
-                        <div className="flex items-center">
-                          <BarChart3 className="w-4 h-4 mr-2" />
-                          Analytics
-                        </div>
-                      }
-                    >
-                      <div className="space-y-4">
-                        {loadingDetails && (
-                          <Card>
-                            <CardBody className="text-center py-8">
-                              <Spinner size="lg" />
-                              <p className="mt-4 text-default-500">
-                                Loading analytics...
-                              </p>
-                            </CardBody>
-                          </Card>
-                        )}
-
-                        {equipmentAnalytics ? (
-                          <Card>
-                            <CardHeader>
-                              <h4 className="font-semibold">
-                                Performance Analytics
-                              </h4>
-                            </CardHeader>
-                            <CardBody>
-                              <div className="text-center py-8">
-                                <BarChart3 className="w-12 h-12 text-primary mx-auto mb-3" />
-                                <p className="text-default-500">
-                                  Analytics data available
-                                </p>
-                                <p className="text-xs text-default-400">
-                                  Detailed performance metrics and trends
-                                </p>
-                              </div>
-                            </CardBody>
-                          </Card>
-                        ) : (
-                          <Card>
-                            <CardBody className="text-center py-8">
-                              <BarChart3 className="w-12 h-12 text-default-400 mx-auto mb-3" />
-                              <h4 className="font-medium">
-                                Analytics Not Available
-                              </h4>
-                              <p className="text-default-500 text-sm">
-                                Performance data is not available for this
-                                equipment
-                              </p>
-                            </CardBody>
-                          </Card>
-                        )}
-                      </div>
-                    </Tab>
-                  </Tabs>
-                )}
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  Close
-                </Button>
-                <Button
-                  color="primary"
-                  startContent={<FileText className="w-4 h-4" />}
-                  onPress={() => {
-                    console.log(
-                      "Generate equipment report for:",
-                      selectedEquipment?.id
-                    );
-                  }}
-                >
-                  Generate Report
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* Maintenance Modal */}
-      <Modal
-        isOpen={isMaintenanceOpen}
-        onOpenChange={onMaintenanceClose}
-        size="3xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader>
-                <div className="flex items-center">
-                  <Wrench className="w-5 h-5 mr-2" />
-                  Maintenance Schedule - {selectedEquipment?.name}
-                </div>
-              </ModalHeader>
-              <ModalBody>
-                <Tabs aria-label="Maintenance tabs" color="primary">
-                  <Tab
-                    key="schedule"
-                    title={
-                      <div className="flex items-center">
-                        <Calendar className="w-4 h-4 mr-2" />
-                        Schedule
-                      </div>
-                    }
-                  >
-                    <div className="space-y-4">
-                      <Card>
-                        <CardHeader>
-                          <h4 className="font-semibold">Log New Maintenance</h4>
-                        </CardHeader>
-                        <CardBody className="space-y-4">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <Select
-                              label="Maintenance Type"
-                              selectedKeys={[
-                                maintenanceFormData.maintenance_type,
-                              ]}
-                              onSelectionChange={(keys) => {
-                                const selectedKey =
-                                  keys === "all"
-                                    ? "preventive"
-                                    : (Array.from(keys)[0] as string);
-                                setMaintenanceFormData((prev) => ({
-                                  ...prev,
-                                  maintenance_type: selectedKey,
-                                }));
-                              }}
-                            >
-                              <SelectItem key="preventive">
-                                Preventive
-                              </SelectItem>
-                              <SelectItem key="corrective">
-                                Corrective
-                              </SelectItem>
-                              <SelectItem key="predictive">
-                                Predictive
-                              </SelectItem>
-                              <SelectItem key="emergency">Emergency</SelectItem>
-                            </Select>
-
-                            <Select
-                              label="Priority"
-                              selectedKeys={[maintenanceFormData.priority]}
-                              onSelectionChange={(keys) => {
-                                const selectedKey =
-                                  keys === "all"
-                                    ? "medium"
-                                    : (Array.from(keys)[0] as string);
-                                setMaintenanceFormData((prev) => ({
-                                  ...prev,
-                                  priority: selectedKey,
-                                }));
-                              }}
-                            >
-                              <SelectItem key="low">Low</SelectItem>
-                              <SelectItem key="medium">Medium</SelectItem>
-                              <SelectItem key="high">High</SelectItem>
-                              <SelectItem key="critical">Critical</SelectItem>
-                            </Select>
-                          </div>
-
-                          <Input
-                            label="Scheduled Date"
-                            type="date"
-                            value={maintenanceFormData.scheduled_date}
-                            onChange={(e) =>
-                              setMaintenanceFormData((prev) => ({
-                                ...prev,
-                                scheduled_date: e.target.value,
-                              }))
-                            }
-                          />
-
-                          <Textarea
-                            label="Description"
-                            placeholder="Describe the maintenance work to be performed"
-                            value={maintenanceFormData.description}
-                            onChange={(e) =>
-                              setMaintenanceFormData((prev) => ({
-                                ...prev,
-                                description: e.target.value,
-                              }))
-                            }
-                            minRows={3}
-                          />
-
-                          <Textarea
-                            label="Notes"
-                            placeholder="Additional notes or special instructions"
-                            value={maintenanceFormData.notes}
-                            onChange={(e) =>
-                              setMaintenanceFormData((prev) => ({
-                                ...prev,
-                                notes: e.target.value,
-                              }))
-                            }
-                            minRows={2}
-                          />
-
-                          <Button
-                            color="primary"
-                            startContent={<Plus className="w-4 h-4" />}
-                            onPress={handleLogMaintenance}
-                            isLoading={submitting}
-                          >
-                            Log Maintenance
-                          </Button>
-                        </CardBody>
-                      </Card>
-
-                      {loadingDetails && (
-                        <Card>
-                          <CardBody className="text-center py-8">
-                            <Spinner size="lg" />
-                            <p className="mt-4 text-default-500">
-                              Loading maintenance history...
-                            </p>
-                          </CardBody>
-                        </Card>
-                      )}
-
-                      {maintenanceHistory.length > 0 && (
-                        <Card>
-                          <CardHeader>
-                            <h4 className="font-semibold">
-                              Maintenance History
-                            </h4>
-                          </CardHeader>
-                          <CardBody>
-                            <div className="space-y-3">
-                              {maintenanceHistory.map((maintenance, index) => (
-                                <div
-                                  key={index}
-                                  className="flex justify-between items-start p-3 bg-default-50 rounded-lg"
-                                >
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <Chip
-                                        color={
-                                          maintenance.maintenance_type ===
-                                          "emergency"
-                                            ? "danger"
-                                            : maintenance.maintenance_type ===
-                                                "corrective"
-                                              ? "warning"
-                                              : "primary"
-                                        }
-                                        size="sm"
-                                      >
-                                        {maintenance.maintenance_type}
-                                      </Chip>
-                                      <Chip
-                                        color={
-                                          maintenance.priority === "critical"
-                                            ? "danger"
-                                            : maintenance.priority === "high"
-                                              ? "warning"
-                                              : "default"
-                                        }
-                                        size="sm"
-                                        variant="flat"
-                                      >
-                                        {maintenance.priority}
-                                      </Chip>
-                                      <Chip
-                                        color={
-                                          maintenance.status === "completed"
-                                            ? "success"
-                                            : maintenance.status ===
-                                                "in_progress"
-                                              ? "warning"
-                                              : "default"
-                                        }
-                                        size="sm"
-                                        variant="dot"
-                                      >
-                                        {maintenance.status}
-                                      </Chip>
-                                    </div>
-                                    <div className="font-medium">
-                                      {maintenance.description}
-                                    </div>
-                                    <div className="text-sm text-default-600">
-                                      Scheduled:{" "}
-                                      {new Date(
-                                        maintenance.scheduled_date
-                                      ).toLocaleDateString()}
-                                      {maintenance.completed_date && (
-                                        <span>
-                                          {" "}
-                                          • Completed:{" "}
-                                          {new Date(
-                                            maintenance.completed_date
-                                          ).toLocaleDateString()}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {maintenance.work_performed && (
-                                      <div className="text-xs text-default-500 mt-1">
-                                        Work: {maintenance.work_performed}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="text-right ml-4">
-                                    {maintenance.cost && (
-                                      <div className="text-sm font-medium">
-                                        ₱{maintenance.cost.toLocaleString()}
-                                      </div>
-                                    )}
-                                    {maintenance.downtime_minutes && (
-                                      <div className="text-xs text-default-500">
-                                        {maintenance.downtime_minutes} min
-                                        downtime
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </CardBody>
-                        </Card>
-                      )}
-                    </div>
-                  </Tab>
-
-                  <Tab
-                    key="predictions"
-                    title={
-                      <div className="flex items-center">
-                        <TrendingUp className="w-4 h-4 mr-2" />
-                        Predictions
-                      </div>
-                    }
-                  >
-                    <Card>
-                      <CardBody className="text-center py-8">
-                        <TrendingUp className="w-12 h-12 text-primary mx-auto mb-3" />
-                        <h4 className="font-medium">Predictive Maintenance</h4>
-                        <p className="text-default-500 text-sm">
-                          Advanced analytics to predict maintenance needs
-                        </p>
-                      </CardBody>
-                    </Card>
-                  </Tab>
-                </Tabs>
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  Close
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* Alerts Modal */}
-      <Modal
-        isOpen={isAlertsOpen}
-        onOpenChange={onAlertsClose}
-        size="3xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader>
-                <div className="flex items-center">
-                  <AlertTriangle className="w-5 h-5 mr-2" />
-                  Equipment Alerts - {selectedEquipment?.name}
-                  {equipmentAlerts.length > 0 && (
-                    <Badge
-                      content={equipmentAlerts.length}
-                      color="danger"
-                      size="sm"
-                      className="ml-2"
-                    >
-                      <span className="w-2 h-2" />
-                    </Badge>
-                  )}
-                  {loadingDetails && <Spinner size="sm" className="ml-2" />}
-                </div>
-              </ModalHeader>
-              <ModalBody>
-                <div className="space-y-4">
-                  {loadingDetails && (
-                    <Card>
-                      <CardBody className="text-center py-8">
-                        <Spinner size="lg" />
-                        <p className="mt-4 text-default-500">
-                          Loading alerts...
-                        </p>
-                      </CardBody>
-                    </Card>
-                  )}
-
-                  {equipmentAlerts.length > 0 ? (
-                    <>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-danger">
-                              {
-                                equipmentAlerts.filter(
-                                  (a) => a.severity === "critical"
-                                ).length
-                              }
-                            </div>
-                            <div className="text-sm text-default-600">
-                              Critical
-                            </div>
-                          </CardBody>
-                        </Card>
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-warning">
-                              {
-                                equipmentAlerts.filter(
-                                  (a) => a.severity === "high"
-                                ).length
-                              }
-                            </div>
-                            <div className="text-sm text-default-600">High</div>
-                          </CardBody>
-                        </Card>
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-primary">
-                              {
-                                equipmentAlerts.filter(
-                                  (a) => a.severity === "medium"
-                                ).length
-                              }
-                            </div>
-                            <div className="text-sm text-default-600">
-                              Medium
-                            </div>
-                          </CardBody>
-                        </Card>
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-success">
-                              {
-                                equipmentAlerts.filter(
-                                  (a) => a.status === "resolved"
-                                ).length
-                              }
-                            </div>
-                            <div className="text-sm text-default-600">
-                              Resolved
-                            </div>
-                          </CardBody>
-                        </Card>
-                      </div>
-
-                      {equipmentAlerts.map((alert) => (
-                        <Card
-                          key={alert.id}
-                          className={`border-l-4 ${
-                            alert.severity === "critical"
-                              ? "border-l-danger"
-                              : alert.severity === "high"
-                                ? "border-l-warning"
-                                : alert.severity === "medium"
-                                  ? "border-l-primary"
-                                  : "border-l-default"
-                          }`}
-                        >
-                          <CardBody>
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Chip
-                                    color={
-                                      alert.severity === "critical"
-                                        ? "danger"
-                                        : alert.severity === "high"
-                                          ? "warning"
-                                          : alert.severity === "medium"
-                                            ? "primary"
-                                            : "default"
-                                    }
-                                    size="sm"
-                                  >
-                                    {alert.severity}
-                                  </Chip>
-                                  <Chip
-                                    color={
-                                      alert.status === "active"
-                                        ? "danger"
-                                        : "success"
-                                    }
-                                    size="sm"
-                                    variant="flat"
-                                  >
-                                    {alert.status}
-                                  </Chip>
-                                  <Chip
-                                    color="default"
-                                    size="sm"
-                                    variant="flat"
-                                  >
-                                    {alert.type}
-                                  </Chip>
-                                </div>
-                                <h5 className="font-semibold text-lg">
-                                  {alert.title}
-                                </h5>
-                                <p className="text-default-600 mt-1">
-                                  {alert.message}
-                                </p>
-                                {alert.description && (
-                                  <p className="text-default-500 text-sm mt-2">
-                                    {alert.description}
-                                  </p>
-                                )}
-                                <div className="flex items-center gap-4 mt-3 text-sm text-default-500">
-                                  <span>
-                                    Created:{" "}
-                                    {new Date(
-                                      alert.created_at
-                                    ).toLocaleString()}
-                                  </span>
-                                  {alert.acknowledged_at && (
-                                    <span>
-                                      Acknowledged:{" "}
-                                      {new Date(
-                                        alert.acknowledged_at
-                                      ).toLocaleString()}
-                                    </span>
-                                  )}
-                                  {alert.resolved_at && (
-                                    <span>
-                                      Resolved:{" "}
-                                      {new Date(
-                                        alert.resolved_at
-                                      ).toLocaleString()}
-                                    </span>
-                                  )}
-                                </div>
-                                {alert.estimated_cost_impact && (
-                                  <div className="mt-2">
-                                    <span className="text-sm text-warning">
-                                      Estimated Cost Impact: ₱
-                                      {alert.estimated_cost_impact.toLocaleString()}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="ml-4">
-                                {alert.status === "active" && (
-                                  <div className="flex gap-2">
-                                    <Button
-                                      size="sm"
-                                      color="warning"
-                                      variant="flat"
-                                      startContent={
-                                        <CheckCircle className="w-4 h-4" />
-                                      }
-                                      onPress={async () => {
-                                        try {
-                                          await alertsAPI.acknowledge(alert.id);
-                                          // Refresh alerts
-                                          const response =
-                                            await alertsAPI.getAll({
-                                              equipment_id:
-                                                selectedEquipment!.id,
-                                              limit: 20,
-                                            });
-                                          if (response.data.success) {
-                                            setEquipmentAlerts(
-                                              safeArray<Alert>(
-                                                response.data.data
-                                              )
-                                            );
-                                          }
-                                        } catch (error) {
-                                          console.error(
-                                            "Failed to acknowledge alert:",
-                                            error
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      Acknowledge
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      color="success"
-                                      startContent={
-                                        <CheckCircle className="w-4 h-4" />
-                                      }
-                                      onPress={async () => {
-                                        try {
-                                          await alertsAPI.resolve(alert.id);
-                                          // Refresh alerts
-                                          const response =
-                                            await alertsAPI.getAll({
-                                              equipment_id:
-                                                selectedEquipment!.id,
-                                              limit: 20,
-                                            });
-                                          if (response.data.success) {
-                                            setEquipmentAlerts(
-                                              safeArray<Alert>(
-                                                response.data.data
-                                              )
-                                            );
-                                          }
-                                        } catch (error) {
-                                          console.error(
-                                            "Failed to resolve alert:",
-                                            error
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      Resolve
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </CardBody>
-                        </Card>
-                      ))}
-                    </>
-                  ) : (
-                    <Card>
-                      <CardBody className="text-center py-8">
-                        <CheckCircle className="w-12 h-12 text-success mx-auto mb-3" />
-                        <h4 className="font-medium text-success">
-                          No Active Alerts
-                        </h4>
-                        <p className="text-default-500 text-sm">
-                          This equipment is operating normally
-                        </p>
-                      </CardBody>
-                    </Card>
-                  )}
-                </div>
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  Close
-                </Button>
-                <Button
-                  color="primary"
-                  startContent={<RefreshCw className="w-4 h-4" />}
-                  onPress={async () => {
-                    if (selectedEquipment) {
-                      setLoadingDetails(true);
-                      try {
-                        const response = await alertsAPI.getAll({
-                          equipment_id: selectedEquipment.id,
-                          limit: 20,
-                        });
-                        if (response.data.success) {
-                          setEquipmentAlerts(
-                            safeArray<Alert>(response.data.data)
-                          );
-                        }
-                      } catch (error) {
-                        console.error("Failed to refresh alerts:", error);
-                      } finally {
-                        setLoadingDetails(false);
-                      }
-                    }
-                  }}
-                >
-                  Refresh
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* Analytics Modal */}
-      <Modal
-        isOpen={isAnalyticsOpen}
-        onOpenChange={onAnalyticsClose}
-        size="4xl"
-        scrollBehavior="inside"
-      >
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader>
-                <div className="flex items-center">
-                  <BarChart3 className="w-5 h-5 mr-2" />
-                  Performance Analytics - {selectedEquipment?.name}
-                  {loadingDetails && <Spinner size="sm" className="ml-2" />}
-                </div>
-              </ModalHeader>
-              <ModalBody>
-                <div className="space-y-6">
-                  {loadingDetails && (
-                    <Card>
-                      <CardBody className="text-center py-8">
-                        <Spinner size="lg" />
-                        <p className="mt-4 text-default-500">
-                          Loading analytics...
-                        </p>
-                      </CardBody>
-                    </Card>
-                  )}
-
-                  {selectedEquipment && (
-                    <>
-                      {/* Performance Metrics Overview */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-primary">
-                              {selectedEquipment.performance_metrics?.efficiency_percentage?.toFixed(
-                                1
-                              ) || "N/A"}
-                              %
-                            </div>
-                            <div className="text-sm text-default-600">
-                              Efficiency
-                            </div>
-                            <Progress
-                              aria-label="Efficiency"
-                              value={
-                                selectedEquipment.performance_metrics
-                                  ?.efficiency_percentage || 0
-                              }
-                              color="primary"
-                              size="sm"
-                              className="mt-2"
-                            />
-                          </CardBody>
-                        </Card>
-
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-success">
-                              {selectedEquipment.performance_metrics?.availability_percentage?.toFixed(
-                                1
-                              ) || "N/A"}
-                              %
-                            </div>
-                            <div className="text-sm text-default-600">
-                              Availability
-                            </div>
-                            <Progress
-                              aria-label="Availability"
-                              value={
-                                selectedEquipment.performance_metrics
-                                  ?.availability_percentage || 0
-                              }
-                              color="success"
-                              size="sm"
-                              className="mt-2"
-                            />
-                          </CardBody>
-                        </Card>
-
-                        <Card>
-                          <CardBody className="text-center">
-                            <div className="text-2xl font-bold text-warning">
-                              {getEquipmentConditionScore(
-                                selectedEquipment
-                              ).toFixed(1)}
-                              %
-                            </div>
-                            <div className="text-sm text-default-600">
-                              Health Score
-                            </div>
-                            <Progress
-                              aria-label="Health Score"
-                              value={getEquipmentConditionScore(
-                                selectedEquipment
-                              )}
-                              color={
-                                getHealthStatusInfo(
-                                  getEquipmentConditionScore(selectedEquipment)
-                                ).color as any
-                              }
-                              size="sm"
-                              className="mt-2"
-                            />
-                          </CardBody>
-                        </Card>
-                      </div>
-
-                      {/* Energy Consumption */}
-                      <Card>
-                        <CardHeader>
-                          <h4 className="font-semibold flex items-center">
-                            <Zap className="w-4 h-4 mr-2" />
-                            Energy Consumption
-                          </h4>
-                        </CardHeader>
-                        <CardBody>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <div className="text-sm text-default-600">
-                                Daily Consumption
-                              </div>
-                              <div className="text-xl font-bold">
-                                {selectedEquipment.performance_metrics?.energy_consumption_kwh_day?.toFixed(
-                                  2
-                                ) || "0"}{" "}
-                                kWh
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-sm text-default-600">
-                                Power Rating
-                              </div>
-                              <div className="text-xl font-bold">
-                                {selectedEquipment.power_rating_kw} kW
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-sm text-default-600">
-                                Operating Hours Today
-                              </div>
-                              <div className="text-xl font-bold">
-                                {selectedEquipment.performance_metrics
-                                  ?.operating_hours_today || "0"}{" "}
-                                hours
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-sm text-default-600">
-                                Load Factor
-                              </div>
-                              <div className="text-xl font-bold">
-                                {selectedEquipment.current_status
-                                  ?.current_load_percentage || "N/A"}
-                                %
-                              </div>
-                            </div>
-                          </div>
-                        </CardBody>
-                      </Card>
-
-                      {/* Reliability Metrics */}
-                      <Card>
-                        <CardHeader>
-                          <h4 className="font-semibold flex items-center">
-                            <Shield className="w-4 h-4 mr-2" />
-                            Reliability Metrics
-                          </h4>
-                        </CardHeader>
-                        <CardBody>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <div className="text-sm text-default-600">
-                                MTBF (Mean Time Between Failures)
-                              </div>
-                              <div className="text-xl font-bold">
-                                {selectedEquipment.performance_metrics
-                                  ?.mtbf_hours || "N/A"}{" "}
-                                hours
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-sm text-default-600">
-                                MTTR (Mean Time To Repair)
-                              </div>
-                              <div className="text-xl font-bold">
-                                {selectedEquipment.performance_metrics
-                                  ?.mttr_hours || "N/A"}{" "}
-                                hours
-                              </div>
-                            </div>
-                          </div>
-                        </CardBody>
-                      </Card>
-
-                      {/* Current Status */}
-                      {selectedEquipment.current_status && (
-                        <Card>
-                          <CardHeader>
-                            <h4 className="font-semibold flex items-center">
-                              <Activity className="w-4 h-4 mr-2" />
-                              Current Status
-                            </h4>
-                          </CardHeader>
-                          <CardBody>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                              <div>
-                                <div className="text-sm text-default-600">
-                                  Operational Status
-                                </div>
-                                <Chip
-                                  color={
-                                    selectedEquipment.current_status
-                                      .operational_status === "running"
-                                      ? "success"
-                                      : selectedEquipment.current_status
-                                            .operational_status === "error"
-                                        ? "danger"
-                                        : "warning"
-                                  }
-                                  size="sm"
-                                >
-                                  {
-                                    selectedEquipment.current_status
-                                      .operational_status
-                                  }
-                                </Chip>
-                              </div>
-                              {selectedEquipment.current_status
-                                .temperature_c && (
-                                <div>
-                                  <div className="text-sm text-default-600">
-                                    Temperature
-                                  </div>
-                                  <div className="text-lg font-bold">
-                                    {
-                                      selectedEquipment.current_status
-                                        .temperature_c
-                                    }
-                                    °C
-                                  </div>
-                                </div>
-                              )}
-                              {selectedEquipment.current_status
-                                .vibration_level && (
-                                <div>
-                                  <div className="text-sm text-default-600">
-                                    Vibration Level
-                                  </div>
-                                  <div className="text-lg font-bold">
-                                    {
-                                      selectedEquipment.current_status
-                                        .vibration_level
-                                    }
-                                  </div>
-                                </div>
-                              )}
-                              {selectedEquipment.current_status
-                                .pressure_bar && (
-                                <div>
-                                  <div className="text-sm text-default-600">
-                                    Pressure
-                                  </div>
-                                  <div className="text-lg font-bold">
-                                    {
-                                      selectedEquipment.current_status
-                                        .pressure_bar
-                                    }{" "}
-                                    bar
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </CardBody>
-                        </Card>
-                      )}
-
-                      {equipmentAnalytics ? (
-                        <Card>
-                          <CardHeader>
-                            <h4 className="font-semibold">
-                              Advanced Analytics
-                            </h4>
-                          </CardHeader>
-                          <CardBody>
-                            <div className="text-center py-8">
-                              <BarChart3 className="w-12 h-12 text-primary mx-auto mb-3" />
-                              <p className="text-default-500">
-                                Advanced analytics data available
-                              </p>
-                              <p className="text-xs text-default-400">
-                                Detailed performance trends and predictions
-                              </p>
-                            </div>
-                          </CardBody>
-                        </Card>
-                      ) : (
-                        <Card>
-                          <CardBody className="text-center py-8">
-                            <Database className="w-12 h-12 text-default-400 mx-auto mb-3" />
-                            <h4 className="font-medium">Historical Data</h4>
-                            <p className="text-default-500 text-sm">
-                              Collecting performance data for trend analysis
-                            </p>
-                          </CardBody>
-                        </Card>
-                      )}
-                    </>
-                  )}
-                </div>
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  Close
-                </Button>
-                <Button
-                  color="primary"
-                  startContent={<Download className="w-4 h-4" />}
-                  onPress={() => {
-                    console.log(
-                      "Export analytics data for:",
-                      selectedEquipment?.id
-                    );
-                  }}
-                >
-                  Export Data
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* QR Code Modal */}
-      <Modal isOpen={isQROpen} onOpenChange={onQRClose} size="md">
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader>
-                <div className="flex items-center">
-                  <QrCode className="w-5 h-5 mr-2" />
-                  QR Code - {selectedEquipment?.name}
-                </div>
-              </ModalHeader>
-              <ModalBody className="text-center">
-                {selectedEquipment && (
-                  <div className="space-y-6">
-                    {/* QR Code Display */}
-                    <div className="bg-white p-8 rounded-lg inline-block border-2 border-default-200">
-                      <div className="w-48 h-48 bg-gray-100 rounded-lg flex items-center justify-center border">
-                        <div className="text-center">
-                          <QrCode className="w-32 h-32 text-gray-400 mx-auto mb-2" />
-                          <div className="text-xs text-gray-500">
-                            QR Code Preview
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Equipment Info */}
-                    <div className="space-y-2">
-                      <div className="font-medium text-lg">
-                        {selectedEquipment.code ||
-                          `EQ-${selectedEquipment.id.toString().padStart(4, "0")}`}
-                      </div>
-                      <div className="text-default-600">
-                        {selectedEquipment.name}
-                      </div>
-                      <div className="text-sm text-default-500">
-                        {selectedEquipment.manufacturer}{" "}
-                        {selectedEquipment.model}
-                      </div>
-                      <div className="text-xs text-default-400">
-                        QR ID:{" "}
-                        {selectedEquipment.qr_code ||
-                          `QR_${selectedEquipment.id}_2024`}
-                      </div>
-                    </div>
-
-                    {/* Additional Info */}
-                    <Card>
-                      <CardBody className="text-left space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-default-600">Building:</span>
-                          <span>{getBuildingName(selectedEquipment)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-default-600">Location:</span>
-                          <span>{selectedEquipment.location}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-default-600">Type:</span>
-                          <span>
-                            {
-                              getTypeInfo(selectedEquipment.equipment_type)
-                                .label
-                            }
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-default-600">Status:</span>
-                          <Chip
-                            color={
-                              getStatusInfo(selectedEquipment.status)
-                                .color as any
-                            }
-                            size="sm"
-                          >
-                            {getStatusInfo(selectedEquipment.status).label}
-                          </Chip>
-                        </div>
-                      </CardBody>
-                    </Card>
-
-                    {/* Instructions */}
-                    <div className="text-xs text-default-400 bg-default-50 p-3 rounded-lg">
-                      <div className="flex items-start">
-                        <QrCode className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
-                        <div className="text-left">
-                          <div className="font-medium mb-1">
-                            Quick Access Instructions:
-                          </div>
-                          <ul className="space-y-1 text-left">
-                            <li>
-                              • Scan this QR code for instant equipment access
-                            </li>
-                            <li>• View maintenance logs and schedules</li>
-                            <li>• Report issues and log maintenance</li>
-                            <li>• Access equipment specifications</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  Close
-                </Button>
-                <Button
-                  color="secondary"
-                  startContent={<FileText className="w-4 h-4" />}
-                  onPress={() => {
-                    console.log("Print QR code for:", selectedEquipment?.id);
-                  }}
-                >
-                  Print
-                </Button>
-                <Button
-                  color="primary"
-                  startContent={<Download className="w-4 h-4" />}
-                  onPress={() => {
-                    console.log("Download QR code for:", selectedEquipment?.id);
-                  }}
-                >
-                  Download
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-    </div>
-  );
-}

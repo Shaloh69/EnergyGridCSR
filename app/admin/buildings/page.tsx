@@ -8,7 +8,6 @@ import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Input } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
 import { Chip } from "@heroui/chip";
-import { Badge } from "@heroui/badge";
 import { Avatar } from "@heroui/avatar";
 import { Tabs, Tab } from "@heroui/tabs";
 import {
@@ -37,8 +36,6 @@ import {
 } from "@heroui/dropdown";
 import { Progress } from "@heroui/progress";
 import { Divider } from "@heroui/divider";
-import { Tooltip } from "@heroui/tooltip";
-import { ScrollShadow } from "@heroui/scroll-shadow";
 
 import {
   Building,
@@ -53,34 +50,19 @@ import {
   Wrench,
   AlertTriangle,
   CheckCircle,
-  TrendingUp,
-  TrendingDown,
   Calendar,
   MapPin,
-  Users,
   BarChart3,
-  Settings,
-  Download,
   RefreshCw,
-  ChevronDown,
   ChevronRight,
   Info,
-  Gauge,
-  Clock,
   Shield,
-  FileText,
-  Star,
-  ArrowUpRight,
-  ArrowDownRight,
-  Minus,
   Power,
   Construction,
   Home,
   Factory,
   GraduationCap,
-  Save,
   X,
-  ExternalLink,
   MoreVertical,
 } from "lucide-react";
 
@@ -97,7 +79,6 @@ import type {
   Building as BuildingType,
   Equipment,
   EnergyReading,
-  PowerQualityReading,
   PowerQualityEvent,
   Alert,
   Audit,
@@ -105,11 +86,7 @@ import type {
   PowerQualityStatsResponse,
   MaintenanceSchedule,
   BuildingQueryParams,
-  EquipmentQueryParams,
-  EnergyQueryParams,
-  PowerQualityQueryParams,
-  AlertQueryParams,
-  AuditQueryParams,
+  ApiResponse,
 } from "@/types/api-types";
 
 import BuildingFormModal, {
@@ -117,46 +94,55 @@ import BuildingFormModal, {
 } from "@/components/buildings/BuildingFormModal";
 
 interface ExtendedBuilding extends BuildingType {
-  equipmentCount?: number;
-  auditCount?: number;
-  avgComplianceScore?: number;
-  lastEnergyReading?: string;
-  totalConsumptionKwh?: number;
-  avgPowerFactor?: number;
-  equipmentStatistics?: {
+  equipment_count?: number;
+  audit_count?: number;
+  avg_compliance_score?: number;
+  last_energy_reading?: string;
+  total_consumption_kwh?: number;
+  avg_power_factor?: number;
+  equipment_summary?: {
+    total_equipment: number;
     operational: number;
     maintenance: number;
     faulty: number;
-    maintenanceNeeded: number;
   };
-  auditStatistics?: {
-    completed: number;
-    inProgress: number;
-    avgComplianceScore: number;
-    lastAuditDate: string;
+  compliance_status?: {
+    overall_score: number;
+    last_assessment: string;
   };
-  energyStatistics?: {
-    monthlyConsumption: number;
-    monthlyConsumptionPerSqm: number;
-    peakDemand: number;
-    avgPowerFactor: number;
-    efficiencyRating: string;
+  performance_summary?: {
+    energy_intensity_kwh_sqm: number;
+    monthly_consumption_kwh: number;
+    efficiency_score: number;
   };
 }
 
-// Type guard functions
+const isApiResponse = <T,>(response: any): response is ApiResponse<T> => {
+  return (
+    response &&
+    typeof response === "object" &&
+    typeof response.success === "boolean" &&
+    typeof response.message === "string" &&
+    "data" in response
+  );
+};
+
 const isArrayOfBuildings = (data: any): data is ExtendedBuilding[] => {
-  return Array.isArray(data);
+  return Array.isArray(data) && (data.length === 0 || "id" in data[0]);
 };
 
 const hasNestedData = (
   data: any
 ): data is { data: ExtendedBuilding[]; pagination?: any } => {
-  return data && typeof data === "object" && Array.isArray(data.data);
+  return (
+    data &&
+    typeof data === "object" &&
+    "data" in data &&
+    Array.isArray(data.data)
+  );
 };
 
 const BuildingsPage: React.FC = () => {
-  // State management
   const [buildings, setBuildings] = useState<ExtendedBuilding[]>([]);
   const [selectedBuilding, setSelectedBuilding] =
     useState<ExtendedBuilding | null>(null);
@@ -174,24 +160,23 @@ const BuildingsPage: React.FC = () => {
   const [maintenanceSchedule, setMaintenanceSchedule] =
     useState<MaintenanceSchedule | null>(null);
 
-  // UI State
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [selectedTab, setSelectedTab] = useState("overview");
   const [viewMode, setViewMode] = useState<"list" | "details">("list");
 
-  // Filters and search
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
 
-  // Form state
   const [buildingForm, setBuildingForm] = useState<BuildingFormData>({
     name: "",
     code: "",
@@ -204,7 +189,6 @@ const BuildingsPage: React.FC = () => {
     address: "",
   });
 
-  // Modal controls
   const {
     isOpen: isCreateOpen,
     onOpen: onCreateOpen,
@@ -221,7 +205,128 @@ const BuildingsPage: React.FC = () => {
     onClose: onDeleteClose,
   } = useDisclosure();
 
-  // Load buildings list
+  const handleCreateOpen = useCallback(() => {
+    setError(null);
+    setSuccessMessage(null);
+    resetForm();
+    onCreateOpen();
+  }, [onCreateOpen]);
+
+  const handleEditOpen = useCallback(() => {
+    setError(null);
+    setSuccessMessage(null);
+    prepareEditForm();
+    onEditOpen();
+  }, [onEditOpen]);
+
+  const handleDeleteOpen = useCallback(() => {
+    setError(null);
+    setSuccessMessage(null);
+    onDeleteOpen();
+  }, [onDeleteOpen]);
+
+  const handleCreateClose = useCallback(() => {
+    setError(null);
+    setSuccessMessage(null);
+    onCreateClose();
+  }, [onCreateClose]);
+
+  const handleEditClose = useCallback(() => {
+    setError(null);
+    setSuccessMessage(null);
+    onEditClose();
+  }, [onEditClose]);
+
+  const handleDeleteClose = useCallback(() => {
+    setError(null);
+    setSuccessMessage(null);
+    onDeleteClose();
+  }, [onDeleteClose]);
+
+  const checkBuildingData = useCallback(async (buildingId: number) => {
+    try {
+      console.log(
+        `🔍 Performing comprehensive data check for building ${buildingId}`
+      );
+
+      const endDate = new Date().toISOString().split("T")[0];
+      const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+
+      const checks = await Promise.allSettled([
+        equipmentAPI.getAll({ building_id: buildingId }),
+        energyAPI.getConsumption({
+          building_id: buildingId,
+          start_date: startDate,
+          end_date: endDate,
+          interval: "daily",
+        }),
+        powerQualityAPI.getData({
+          building_id: buildingId,
+          start_date: startDate,
+          end_date: endDate,
+        }),
+        auditsAPI.getAll({ building_id: buildingId }),
+        alertsAPI.getAll({ building_id: buildingId }),
+        equipmentAPI.getMaintenanceSchedule(buildingId),
+      ]);
+
+      const results = {
+        equipment: 0,
+        energy_readings: 0,
+        power_quality_events: 0,
+        audits: 0,
+        alerts: 0,
+        maintenance_records: 0,
+      };
+
+      checks.forEach((check, index) => {
+        if (check.status === "fulfilled" && check.value.data?.success) {
+          const data = check.value.data.data;
+          switch (index) {
+            case 0:
+              results.equipment = Array.isArray(data) ? data.length : 0;
+              break;
+            case 1:
+              results.energy_readings =
+                data?.daily_data?.length ||
+                data?.hourly_data?.length ||
+                (Array.isArray(data) ? data.length : 0);
+              break;
+            case 2:
+              results.power_quality_events = data?.events?.length || 0;
+              break;
+            case 3:
+              results.audits = Array.isArray(data) ? data.length : 0;
+              break;
+            case 4:
+              results.alerts = Array.isArray(data) ? data.length : 0;
+              break;
+            case 5:
+              results.maintenance_records = data?.schedule?.length || 0;
+              break;
+          }
+        }
+      });
+
+      console.log("📊 Comprehensive data check results:", results);
+      return results;
+    } catch (error) {
+      console.error("❌ Error checking building data:", error);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => {
+        setSuccessMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
   const loadBuildings = useCallback(async () => {
     try {
       setLoading(true);
@@ -232,7 +337,7 @@ const BuildingsPage: React.FC = () => {
         limit: 20,
         sortBy: sortBy as any,
         sortOrder,
-        ...(searchQuery && { search: searchQuery }),
+        ...(searchQuery.trim() && { search: searchQuery.trim() }),
         ...(statusFilter !== "all" && { status: statusFilter as any }),
         ...(typeFilter !== "all" && { building_type: typeFilter as any }),
       };
@@ -240,97 +345,140 @@ const BuildingsPage: React.FC = () => {
       console.log("🏢 Loading buildings with params:", params);
       const response = await buildingsAPI.getAll(params);
 
-      console.log("🔍 Buildings API response structure:", {
-        status: response.status,
-        success: response.data?.success,
-        dataType: typeof response.data?.data,
-        dataKeys: response.data?.data ? Object.keys(response.data.data) : "N/A",
-        pagination: response.data?.pagination,
-        fullData: response.data?.data,
-      });
-
-      if (response.data && response.data.success === true) {
+      if (response.data && response.data.success) {
         const responseData = response.data.data;
+        let buildingsData: ExtendedBuilding[] = [];
+        let paginationData = response.data.pagination;
 
-        // Handle different response structures with proper type guards
         if (isArrayOfBuildings(responseData)) {
-          // Direct array response
-          setBuildings(responseData);
-          console.log(
-            `✅ Loaded ${responseData.length} buildings from direct array`
-          );
+          buildingsData = responseData;
         } else if (hasNestedData(responseData)) {
-          // Nested data structure { data: Building[], pagination: {...} }
-          setBuildings(responseData.data);
-          console.log(
-            `✅ Loaded ${responseData.data.length} buildings from nested structure`
-          );
-
-          // Handle nested pagination
-          if (
-            responseData.pagination &&
-            typeof responseData.pagination === "object" &&
-            "total_pages" in responseData.pagination &&
-            typeof responseData.pagination.total_pages === "number"
-          ) {
-            setTotalPages(responseData.pagination.total_pages);
-          }
+          buildingsData = responseData.data;
+          paginationData = responseData.pagination || response.data.pagination;
+        } else if (responseData === null || responseData === undefined) {
+          buildingsData = [];
         } else {
-          console.warn("⚠️ Unexpected response data structure:", responseData);
-          setBuildings([]);
+          throw new Error("Unexpected response format from server");
         }
 
-        // Handle top-level pagination
-        if (
-          response.data.pagination &&
-          typeof response.data.pagination === "object" &&
-          "total_pages" in response.data.pagination &&
-          typeof response.data.pagination.total_pages === "number"
-        ) {
-          setTotalPages(response.data.pagination.total_pages);
+        setBuildings(buildingsData);
+
+        if (paginationData) {
+          setTotalPages(paginationData.total_pages || 1);
+          setTotalCount(paginationData.total_count || 0);
+        } else {
+          setTotalPages(1);
+          setTotalCount(buildingsData.length);
         }
       } else {
-        console.warn("⚠️ API response indicates failure:", response.data);
-        setBuildings([]);
-        setError(response.data?.message || "Failed to load buildings data");
+        throw new Error(response.data?.message || "Failed to load buildings");
       }
     } catch (error: any) {
       console.error("❌ Failed to load buildings:", error);
-      const errorMessage =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        "Failed to load buildings";
+
+      let errorMessage = "Failed to load buildings";
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       setError(errorMessage);
       setBuildings([]);
+      setTotalPages(1);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
   }, [currentPage, searchQuery, statusFilter, typeFilter, sortBy, sortOrder]);
 
-  // Load building details and related data
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      const handler = setTimeout(() => {
+        if (currentPage !== 1) {
+          setCurrentPage(1);
+        } else {
+          loadBuildings();
+        }
+      }, 500);
+      return () => clearTimeout(handler);
+    } else {
+      loadBuildings();
+    }
+  }, [loadBuildings, searchQuery]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      if (currentPage !== 1) {
+        setCurrentPage(1);
+      } else {
+        loadBuildings();
+      }
+    }
+  }, [statusFilter, typeFilter, sortBy, sortOrder]);
+
+  useEffect(() => {
+    if (currentPage > 1) {
+      loadBuildings();
+    }
+  }, [currentPage]);
+
   const loadBuildingDetails = useCallback(
     async (building: ExtendedBuilding) => {
       try {
         setDetailsLoading(true);
+        setError(null);
         setSelectedBuilding(building);
 
-        console.log("🏢 Loading details for building:", building.id);
-
-        // Load building details
         try {
           const buildingResponse = await buildingsAPI.getById(building.id);
-          if (buildingResponse.data && buildingResponse.data.success === true) {
+          if (buildingResponse.data?.success) {
             setSelectedBuilding(buildingResponse.data.data);
           }
         } catch (error) {
-          console.error("❌ Failed to load building details:", error);
+          console.warn("⚠️ Failed to load enhanced building details:", error);
         }
 
-        // Load related data in parallel
-        const startDate = new Date();
-        startDate.setMonth(startDate.getMonth() - 1);
         const endDate = new Date();
+        const startDate = new Date();
+        startDate.setMonth(startDate.getMonth() - 3);
+
+        const startDateStr = startDate.toISOString().split("T")[0];
+        const endDateStr = endDate.toISOString().split("T")[0];
+
+        const dataPromises = [
+          equipmentAPI
+            .getAll({ building_id: building.id })
+            .catch((e) => ({ error: e })),
+          energyAPI
+            .getConsumption({
+              building_id: building.id,
+              start_date: startDateStr,
+              end_date: endDateStr,
+              interval: "daily",
+            })
+            .catch((e) => ({ error: e })),
+          energyAPI.getStats(building.id).catch((e) => ({ error: e })),
+          powerQualityAPI
+            .getData({
+              building_id: building.id,
+              start_date: startDateStr,
+              end_date: endDateStr,
+            })
+            .catch((e) => ({ error: e })),
+          powerQualityAPI.getStats(building.id).catch((e) => ({ error: e })),
+          auditsAPI
+            .getAll({ building_id: building.id })
+            .catch((e) => ({ error: e })),
+          alertsAPI
+            .getAll({ building_id: building.id, limit: 50 })
+            .catch((e) => ({ error: e })),
+          equipmentAPI
+            .getMaintenanceSchedule(building.id)
+            .catch((e) => ({ error: e })),
+        ];
 
         const [
           equipmentResponse,
@@ -341,112 +489,81 @@ const BuildingsPage: React.FC = () => {
           auditsResponse,
           alertsResponse,
           maintenanceResponse,
-        ] = await Promise.allSettled([
-          equipmentAPI.getAll({ building_id: building.id }),
-          energyAPI.getConsumption({
-            building_id: building.id,
-            start_date: startDate.toISOString().split("T")[0],
-            end_date: endDate.toISOString().split("T")[0],
-            interval: "daily",
-          }),
-          energyAPI.getStats(building.id),
-          powerQualityAPI.getData({
-            building_id: building.id,
-            start_date: startDate.toISOString().split("T")[0],
-            end_date: endDate.toISOString().split("T")[0],
-          }),
-          powerQualityAPI.getStats(building.id),
-          auditsAPI.getAll({ building_id: building.id }),
-          alertsAPI.getAll({ building_id: building.id, limit: 20 }),
-          equipmentAPI.getMaintenanceSchedule(building.id),
-        ]);
+        ] = await Promise.all(dataPromises);
 
-        // Process responses with better error handling
-        if (
-          equipmentResponse.status === "fulfilled" &&
-          equipmentResponse.value.data.success
-        ) {
-          const equipmentData = equipmentResponse.value.data.data;
-          setBuildingEquipment(
-            Array.isArray(equipmentData) ? equipmentData : []
-          );
+        if ("error" in equipmentResponse) {
+          setBuildingEquipment([]);
+        } else if (equipmentResponse.data?.success) {
+          const data = equipmentResponse.data.data;
+          setBuildingEquipment(Array.isArray(data) ? data : []);
         } else {
           setBuildingEquipment([]);
         }
 
-        if (
-          energyResponse.status === "fulfilled" &&
-          energyResponse.value.data.success
-        ) {
-          const energyData = energyResponse.value.data.data;
-          setBuildingEnergy(
-            energyData?.daily_data || energyData?.hourly_data || []
-          );
+        if ("error" in energyResponse) {
+          setBuildingEnergy([]);
+        } else if (energyResponse.data?.success) {
+          const data = energyResponse.data.data;
+          setBuildingEnergy(data?.daily_data || data?.hourly_data || []);
         } else {
           setBuildingEnergy([]);
         }
 
-        if (
-          energyStatsResponse.status === "fulfilled" &&
-          energyStatsResponse.value.data.success
-        ) {
-          setBuildingEnergyStats(energyStatsResponse.value.data.data);
+        if ("error" in energyStatsResponse) {
+          setBuildingEnergyStats(null);
+        } else if (energyStatsResponse.data?.success) {
+          setBuildingEnergyStats(energyStatsResponse.data.data);
         } else {
           setBuildingEnergyStats(null);
         }
 
-        if (
-          powerQualityResponse.status === "fulfilled" &&
-          powerQualityResponse.value.data.success
-        ) {
-          const powerQualityData = powerQualityResponse.value.data.data;
-          setBuildingPowerQuality(powerQualityData?.events || []);
+        if ("error" in powerQualityResponse) {
+          setBuildingPowerQuality([]);
+        } else if (powerQualityResponse.data?.success) {
+          const data = powerQualityResponse.data.data;
+          setBuildingPowerQuality(data?.events || []);
         } else {
           setBuildingPowerQuality([]);
         }
 
-        if (
-          powerQualityStatsResponse.status === "fulfilled" &&
-          powerQualityStatsResponse.value.data.success
-        ) {
-          setBuildingPowerQualityStats(
-            powerQualityStatsResponse.value.data.data
-          );
+        if ("error" in powerQualityStatsResponse) {
+          setBuildingPowerQualityStats(null);
+        } else if (powerQualityStatsResponse.data?.success) {
+          setBuildingPowerQualityStats(powerQualityStatsResponse.data.data);
         } else {
           setBuildingPowerQualityStats(null);
         }
 
-        if (
-          auditsResponse.status === "fulfilled" &&
-          auditsResponse.value.data.success
-        ) {
-          const auditsData = auditsResponse.value.data.data;
-          setBuildingAudits(Array.isArray(auditsData) ? auditsData : []);
+        if ("error" in auditsResponse) {
+          setBuildingAudits([]);
+        } else if (auditsResponse.data?.success) {
+          const data = auditsResponse.data.data;
+          setBuildingAudits(Array.isArray(data) ? data : []);
         } else {
           setBuildingAudits([]);
         }
 
-        if (
-          alertsResponse.status === "fulfilled" &&
-          alertsResponse.value.data.success
-        ) {
-          const alertsData = alertsResponse.value.data.data;
-          setBuildingAlerts(Array.isArray(alertsData) ? alertsData : []);
+        if ("error" in alertsResponse) {
+          setBuildingAlerts([]);
+        } else if (alertsResponse.data?.success) {
+          const data = alertsResponse.data.data;
+          setBuildingAlerts(Array.isArray(data) ? data : []);
         } else {
           setBuildingAlerts([]);
         }
 
-        if (
-          maintenanceResponse.status === "fulfilled" &&
-          maintenanceResponse.value.data.success
-        ) {
-          setMaintenanceSchedule(maintenanceResponse.value.data.data);
+        if ("error" in maintenanceResponse) {
+          setMaintenanceSchedule(null);
+        } else if (maintenanceResponse.data?.success) {
+          setMaintenanceSchedule(maintenanceResponse.data.data);
         } else {
           setMaintenanceSchedule(null);
         }
+
+        console.log("✅ Building details loaded successfully");
       } catch (error: any) {
         console.error("❌ Failed to load building details:", error);
-        setError("Failed to load building details");
+        setError("Failed to load building details. Please try again.");
       } finally {
         setDetailsLoading(false);
       }
@@ -454,57 +571,201 @@ const BuildingsPage: React.FC = () => {
     []
   );
 
-  // Handle form submission for create/edit
-  const handleSubmit = async (isEdit: boolean = false) => {
-    try {
-      setSubmitLoading(true);
+  const handleSubmit = useCallback(
+    async (isEdit: boolean = false) => {
+      try {
+        setSubmitLoading(true);
+        setError(null);
 
-      if (isEdit && selectedBuilding) {
-        const response = await buildingsAPI.update(
-          selectedBuilding.id,
-          buildingForm
-        );
-        if (response.data.success) {
-          setSelectedBuilding(response.data.data);
-          onEditClose();
-          loadBuildings();
+        if (!buildingForm.name?.trim()) {
+          throw new Error("Building name is required");
         }
-      } else {
-        const response = await buildingsAPI.create(buildingForm);
-        if (response.data.success) {
-          onCreateClose();
-          loadBuildings();
-          resetForm();
+        if (!buildingForm.code?.trim()) {
+          throw new Error("Building code is required");
         }
+
+        const submitData = {
+          ...buildingForm,
+          name: buildingForm.name.trim(),
+          code: buildingForm.code.trim(),
+          description: buildingForm.description?.trim() || "",
+          address: buildingForm.address?.trim() || "",
+          area_sqm: Number(buildingForm.area_sqm) || 0,
+          floors: Number(buildingForm.floors) || 1,
+          year_built:
+            Number(buildingForm.year_built) || new Date().getFullYear(),
+        };
+
+        let response;
+        if (isEdit && selectedBuilding) {
+          response = await buildingsAPI.update(selectedBuilding.id, submitData);
+          if (response.data.success) {
+            setSelectedBuilding(response.data.data);
+            setSuccessMessage("Building updated successfully!");
+            handleEditClose();
+          }
+        } else {
+          response = await buildingsAPI.create(submitData);
+          if (response.data.success) {
+            setSuccessMessage("Building created successfully!");
+            handleCreateClose();
+            resetForm();
+          }
+        }
+
+        await loadBuildings();
+      } catch (error: any) {
+        console.error("❌ Form submission failed:", error);
+
+        let errorMessage = "Operation failed";
+        if (error.response?.data?.validation_errors) {
+          const validationErrors = error.response.data.validation_errors;
+          errorMessage = validationErrors
+            .map((err: any) => `${err.field}: ${err.message}`)
+            .join(", ");
+        } else if (error.response?.data?.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+
+        setError(errorMessage);
+      } finally {
+        setSubmitLoading(false);
       }
-    } catch (error: any) {
-      console.error("❌ Form submission failed:", error);
-      setError(error.response?.data?.message || "Operation failed");
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  // Handle building deletion
-  const handleDelete = async () => {
+    },
+    [
+      buildingForm,
+      selectedBuilding,
+      handleEditClose,
+      handleCreateClose,
+      loadBuildings,
+    ]
+  );
+  const handleBackToList = useCallback(() => {
+    setViewMode("list");
+    setSelectedBuilding(null);
+    setBuildingEquipment([]);
+    setBuildingEnergy([]);
+    setBuildingEnergyStats(null);
+    setBuildingPowerQuality([]);
+    setBuildingPowerQualityStats(null);
+    setBuildingAudits([]);
+    setBuildingAlerts([]);
+    setMaintenanceSchedule(null);
+    setSelectedTab("overview");
+    setError(null);
+  }, []);
+  const handleDelete = useCallback(async () => {
     if (!selectedBuilding) return;
 
     try {
       setSubmitLoading(true);
+      setError(null);
+
+      const dataCheck = await checkBuildingData(selectedBuilding.id);
+
+      if (dataCheck) {
+        const totalData = Object.values(dataCheck).reduce(
+          (sum, count) => sum + count,
+          0
+        );
+        console.log(
+          `📊 Found ${totalData} total associated records:`,
+          dataCheck
+        );
+      }
+
       await buildingsAPI.delete(selectedBuilding.id);
-      onDeleteClose();
+
+      setSuccessMessage(
+        `Building "${selectedBuilding.name}" has been deleted successfully.`
+      );
+      handleDeleteClose();
       handleBackToList();
-      loadBuildings();
+      await loadBuildings();
     } catch (error: any) {
       console.error("❌ Delete failed:", error);
-      setError(error.response?.data?.message || "Delete failed");
+
+      let errorMessage = "Delete operation failed";
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      if (
+        errorMessage.includes("associated") ||
+        errorMessage.includes("constraint") ||
+        errorMessage.includes("foreign key")
+      ) {
+        const enhancedError = `Cannot delete building with associated data.
+
+The server has detected data relationships that prevent deletion:
+• Energy consumption records
+• Equipment assignments
+• Audit histories
+• Alert records
+• Maintenance logs
+• System references
+
+Recommendation: Set the building status to "Inactive" to safely remove it from active use while preserving data integrity.`;
+
+        setError(enhancedError);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setSubmitLoading(false);
     }
-  };
+  }, [
+    selectedBuilding,
+    checkBuildingData,
+    handleDeleteClose,
+    handleBackToList,
+    loadBuildings,
+  ]);
 
-  // Reset form
-  const resetForm = () => {
+  const handleSetInactive = useCallback(async () => {
+    if (!selectedBuilding) return;
+
+    try {
+      setSubmitLoading(true);
+      setError(null);
+
+      const response = await buildingsAPI.update(selectedBuilding.id, {
+        status: "inactive",
+      });
+
+      if (response.data.success) {
+        setSelectedBuilding(response.data.data);
+        setSuccessMessage(
+          `Building "${selectedBuilding.name}" has been set to inactive status.`
+        );
+        handleDeleteClose();
+        await loadBuildings();
+
+        if (viewMode === "details") {
+          await loadBuildingDetails(response.data.data);
+        }
+      }
+    } catch (error: any) {
+      console.error("❌ Set inactive failed:", error);
+      setError(
+        error.response?.data?.message || "Failed to set building inactive"
+      );
+    } finally {
+      setSubmitLoading(false);
+    }
+  }, [
+    selectedBuilding,
+    handleDeleteClose,
+    loadBuildings,
+    viewMode,
+    loadBuildingDetails,
+  ]);
+
+  const resetForm = useCallback(() => {
     setBuildingForm({
       name: "",
       code: "",
@@ -516,10 +777,9 @@ const BuildingsPage: React.FC = () => {
       status: "active",
       address: "",
     });
-  };
+  }, []);
 
-  // Prepare edit form
-  const prepareEditForm = () => {
+  const prepareEditForm = useCallback(() => {
     if (selectedBuilding) {
       setBuildingForm({
         name: selectedBuilding.name || "",
@@ -543,18 +803,8 @@ const BuildingsPage: React.FC = () => {
         address: selectedBuilding.address || "",
       });
     }
-  };
+  }, [selectedBuilding]);
 
-  // Initial load
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      loadBuildings();
-    }, 500); // waits 500ms after typing stops
-
-    return () => clearTimeout(handler);
-  }, [loadBuildings]);
-
-  // Handle building selection
   const handleBuildingSelect = useCallback(
     (building: ExtendedBuilding) => {
       setViewMode("details");
@@ -563,26 +813,12 @@ const BuildingsPage: React.FC = () => {
     [loadBuildingDetails]
   );
 
-  // Handle back to list
-  const handleBackToList = useCallback(() => {
-    setViewMode("list");
-    setSelectedBuilding(null);
-    setBuildingEquipment([]);
-    setBuildingEnergy([]);
-    setBuildingEnergyStats(null);
-    setBuildingPowerQuality([]);
-    setBuildingPowerQualityStats(null);
-    setBuildingAudits([]);
-    setBuildingAlerts([]);
-    setMaintenanceSchedule(null);
-    setSelectedTab("overview");
-  }, []);
-
-  // Filter buildings
   const filteredBuildings = useMemo(() => {
+    if (!Array.isArray(buildings)) return [];
+
     return buildings.filter((building) => {
       const matchesSearch =
-        !searchQuery ||
+        !searchQuery.trim() ||
         building.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         building.code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         building.description?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -596,8 +832,36 @@ const BuildingsPage: React.FC = () => {
     });
   }, [buildings, searchQuery, statusFilter, typeFilter]);
 
-  // Render status chip
-  const renderStatusChip = (status: string) => {
+  const safeFormat = {
+    number: (value: any, decimals: number = 2): string => {
+      if (value === null || value === undefined || value === "") return "N/A";
+      const num = typeof value === "string" ? parseFloat(value) : Number(value);
+      return !isNaN(num) && isFinite(num) ? num.toFixed(decimals) : "N/A";
+    },
+
+    integer: (value: any): string => {
+      if (value === null || value === undefined || value === "") return "N/A";
+      const num = typeof value === "string" ? parseFloat(value) : Number(value);
+      return !isNaN(num) && isFinite(num)
+        ? Math.round(num).toLocaleString()
+        : "N/A";
+    },
+
+    percentage: (value: any, decimals: number = 0): string => {
+      if (value === null || value === undefined || value === "") return "N/A";
+      const num = typeof value === "string" ? parseFloat(value) : Number(value);
+      return !isNaN(num) && isFinite(num) ? `${num.toFixed(decimals)}%` : "N/A";
+    },
+
+    getValue: (value: any, fallback: number = 0): number => {
+      if (value === null || value === undefined || value === "")
+        return fallback;
+      const num = typeof value === "string" ? parseFloat(value) : Number(value);
+      return !isNaN(num) && isFinite(num) ? num : fallback;
+    },
+  };
+
+  const renderStatusChip = useCallback((status: string) => {
     const statusConfig = {
       active: { color: "success" as const, label: "Active" },
       maintenance: { color: "warning" as const, label: "Maintenance" },
@@ -614,10 +878,9 @@ const BuildingsPage: React.FC = () => {
         {config.label}
       </Chip>
     );
-  };
+  }, []);
 
-  // Render building type chip
-  const renderTypeChip = (type: string) => {
+  const renderTypeChip = useCallback((type: string) => {
     const typeIcons = {
       commercial: <Building className="w-3 h-3" />,
       industrial: <Factory className="w-3 h-3" />,
@@ -635,49 +898,9 @@ const BuildingsPage: React.FC = () => {
         {type?.replace("_", " ")}
       </Chip>
     );
-  };
+  }, []);
 
-  // Comprehensive number formatting helper
-  const safeFormat = {
-    number: (value: any, decimals: number = 2): string => {
-      if (value === null || value === undefined) return "N/A";
-      const num = typeof value === "string" ? parseFloat(value) : Number(value);
-      return !isNaN(num) && isFinite(num) ? num.toFixed(decimals) : "N/A";
-    },
-
-    integer: (value: any): string => {
-      if (value === null || value === undefined) return "N/A";
-      const num = typeof value === "string" ? parseFloat(value) : Number(value);
-      return !isNaN(num) && isFinite(num)
-        ? Math.round(num).toLocaleString()
-        : "N/A";
-    },
-
-    percentage: (value: any, decimals: number = 0): string => {
-      if (value === null || value === undefined) return "N/A";
-      const num = typeof value === "string" ? parseFloat(value) : Number(value);
-      return !isNaN(num) && isFinite(num) ? `${num.toFixed(decimals)}%` : "N/A";
-    },
-
-    getValue: (value: any, fallback: number = 0): number => {
-      if (value === null || value === undefined) return fallback;
-      const num = typeof value === "string" ? parseFloat(value) : Number(value);
-      return !isNaN(num) && isFinite(num) ? num : fallback;
-    },
-  };
-
-  // Helper function to safely format numbers
-  const formatNumber = (value: any, decimals: number = 2): string => {
-    return safeFormat.number(value, decimals);
-  };
-
-  // Helper function to safely get numeric value
-  const getNumericValue = (value: any, fallback: number = 0): number => {
-    return safeFormat.getValue(value, fallback);
-  };
-
-  // Render efficiency rating
-  const renderEfficiencyRating = (score: any) => {
+  const renderEfficiencyRating = useCallback((score: any) => {
     const numericScore = safeFormat.getValue(score, 0);
     const getColor = (score: number) => {
       if (score >= 90) return "success";
@@ -698,11 +921,10 @@ const BuildingsPage: React.FC = () => {
         </span>
       </div>
     );
-  };
+  }, []);
 
-  // Delete Confirmation Modal
   const DeleteConfirmationModal = () => (
-    <Modal isOpen={isDeleteOpen} onClose={onDeleteClose}>
+    <Modal isOpen={isDeleteOpen} onClose={handleDeleteClose} size="3xl">
       <ModalContent>
         <ModalHeader>
           <h2 className="text-xl font-semibold text-danger">Delete Building</h2>
@@ -722,46 +944,162 @@ const BuildingsPage: React.FC = () => {
               </div>
             </div>
 
+            {error && (
+              <div className="p-4 bg-warning-50 border border-warning-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <Info className="w-5 h-5 text-warning-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-medium text-warning-800 mb-2">
+                      Deletion Not Allowed
+                    </p>
+                    <div className="text-sm text-warning-700 whitespace-pre-line">
+                      {error}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {selectedBuilding && (
               <div className="p-4 bg-default-100 rounded-lg">
-                <p>
-                  <strong>Building:</strong> {selectedBuilding.name}
-                </p>
-                <p>
-                  <strong>Code:</strong> {selectedBuilding.code}
-                </p>
-                <p>
-                  <strong>Equipment:</strong> {buildingEquipment.length} items
-                </p>
-                <p>
-                  <strong>Audits:</strong> {buildingAudits.length} records
-                </p>
+                <h4 className="font-medium mb-3">Building Information:</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-default-500">Name:</span>
+                    <span className="ml-2 font-medium">
+                      {selectedBuilding.name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Code:</span>
+                    <span className="ml-2 font-medium">
+                      {selectedBuilding.code}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Status:</span>
+                    <span className="ml-2">
+                      {selectedBuilding.status &&
+                        renderStatusChip(selectedBuilding.status)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Type:</span>
+                    <span className="ml-2">
+                      {selectedBuilding.building_type &&
+                        renderTypeChip(selectedBuilding.building_type)}
+                    </span>
+                  </div>
+                </div>
+
+                <h4 className="font-medium mt-4 mb-3">Associated Data:</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-default-500">Equipment:</span>
+                    <span
+                      className={`ml-2 font-medium ${buildingEquipment.length > 0 ? "text-warning" : "text-success"}`}
+                    >
+                      {buildingEquipment.length} items
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Audits:</span>
+                    <span
+                      className={`ml-2 font-medium ${buildingAudits.length > 0 ? "text-warning" : "text-success"}`}
+                    >
+                      {buildingAudits.length} records
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Alerts:</span>
+                    <span
+                      className={`ml-2 font-medium ${buildingAlerts.length > 0 ? "text-warning" : "text-success"}`}
+                    >
+                      {buildingAlerts.length} records
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Energy Data:</span>
+                    <span
+                      className={`ml-2 font-medium ${buildingEnergy.length > 0 ? "text-warning" : "text-success"}`}
+                    >
+                      {buildingEnergy.length} records
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Power Quality:</span>
+                    <span
+                      className={`ml-2 font-medium ${buildingPowerQuality.length > 0 ? "text-warning" : "text-success"}`}
+                    >
+                      {buildingPowerQuality.length} events
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-default-500">Maintenance:</span>
+                    <span
+                      className={`ml-2 font-medium ${(maintenanceSchedule?.schedule?.length || 0) > 0 ? "text-warning" : "text-success"}`}
+                    >
+                      {maintenanceSchedule?.schedule?.length || 0} records
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </ModalBody>
         <ModalFooter>
-          <Button
-            variant="flat"
-            onPress={onDeleteClose}
-            isDisabled={submitLoading}
-          >
-            Cancel
-          </Button>
-          <Button
-            color="danger"
-            onPress={handleDelete}
-            isLoading={submitLoading}
-            startContent={<Trash2 className="w-4 h-4" />}
-          >
-            Delete Building
-          </Button>
+          <div className="flex gap-3 w-full">
+            <Button
+              variant="flat"
+              onPress={handleDeleteClose}
+              isDisabled={submitLoading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+
+            {error &&
+            (error.includes("associated") ||
+              error.includes("constraint") ||
+              error.includes("Cannot delete")) ? (
+              <>
+                <Button
+                  color="warning"
+                  onPress={handleSetInactive}
+                  isLoading={submitLoading}
+                  startContent={<Power className="w-4 h-4" />}
+                  className="flex-1"
+                >
+                  Set Inactive Instead
+                </Button>
+                <Button
+                  color="danger"
+                  variant="bordered"
+                  onPress={handleDelete}
+                  isLoading={submitLoading}
+                  startContent={<Trash2 className="w-4 h-4" />}
+                  className="flex-1"
+                >
+                  Force Delete
+                </Button>
+              </>
+            ) : (
+              <Button
+                color="danger"
+                onPress={handleDelete}
+                isLoading={submitLoading}
+                startContent={<Trash2 className="w-4 h-4" />}
+                className="flex-1"
+              >
+                Delete Building
+              </Button>
+            )}
+          </div>
         </ModalFooter>
       </ModalContent>
     </Modal>
   );
 
-  // Loading state
   if (loading && buildings.length === 0) {
     return (
       <div className="p-6">
@@ -775,8 +1113,7 @@ const BuildingsPage: React.FC = () => {
     );
   }
 
-  // Error state
-  if (error && buildings.length === 0) {
+  if (error && buildings.length === 0 && !loading) {
     return (
       <div className="p-6">
         <Card>
@@ -790,6 +1127,7 @@ const BuildingsPage: React.FC = () => {
               color="primary"
               onPress={loadBuildings}
               startContent={<RefreshCw className="w-4 h-4" />}
+              isLoading={loading}
             >
               Retry
             </Button>
@@ -799,11 +1137,29 @@ const BuildingsPage: React.FC = () => {
     );
   }
 
-  // Buildings list view
   if (viewMode === "list") {
     return (
       <div className="p-6 space-y-6">
-        {/* Header */}
+        {successMessage && (
+          <Card className="bg-success-50 border-success-200">
+            <CardBody className="p-4">
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-success-600" />
+                <p className="text-success-800 font-medium">{successMessage}</p>
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="light"
+                  onPress={() => setSuccessMessage(null)}
+                  className="ml-auto"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </CardBody>
+          </Card>
+        )}
+
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground-600 bg-clip-text text-transparent">
@@ -818,10 +1174,7 @@ const BuildingsPage: React.FC = () => {
           <div className="flex items-center gap-3">
             <Button
               color="primary"
-              onPress={() => {
-                resetForm();
-                onCreateOpen();
-              }}
+              onPress={handleCreateOpen}
               startContent={<Plus className="w-4 h-4" />}
               className="bg-gradient-to-r from-primary to-secondary"
             >
@@ -838,7 +1191,6 @@ const BuildingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
             <CardBody className="p-4">
@@ -848,7 +1200,7 @@ const BuildingsPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm text-default-500">Total Buildings</p>
-                  <p className="text-xl font-semibold">{buildings.length}</p>
+                  <p className="text-xl font-semibold">{totalCount}</p>
                 </div>
               </div>
             </CardBody>
@@ -906,7 +1258,6 @@ const BuildingsPage: React.FC = () => {
           </Card>
         </div>
 
-        {/* Filters and Search */}
         <Card>
           <CardBody>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -978,14 +1329,12 @@ const BuildingsPage: React.FC = () => {
           </CardBody>
         </Card>
 
-        {/* Buildings Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredBuildings.map((building) => (
             <Card
               key={building.id}
               className="hover:shadow-lg transition-all duration-200 hover:scale-[1.02] bg-gradient-to-br from-background to-content1 border border-divider hover:border-primary/30 cursor-pointer"
             >
-              {/* Clickable area for card selection */}
               <div
                 className="flex-1"
                 onClick={() => handleBuildingSelect(building)}
@@ -1016,7 +1365,6 @@ const BuildingsPage: React.FC = () => {
                       </p>
                     )}
 
-                    {/* Building Specs */}
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="flex items-center gap-2">
                         <MapPin className="w-4 h-4 text-default-400" />
@@ -1037,7 +1385,7 @@ const BuildingsPage: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <Wrench className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.equipmentCount ||
+                          {building.equipment_count ||
                             building.equipment_summary?.total_equipment ||
                             0}{" "}
                           equipment
@@ -1051,11 +1399,10 @@ const BuildingsPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Performance Metrics */}
                     <Divider />
 
                     <div className="space-y-3">
-                      {(building.avgComplianceScore ||
+                      {(building.avg_compliance_score ||
                         building.compliance_status?.overall_score) && (
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-default-600 flex items-center gap-2">
@@ -1063,16 +1410,16 @@ const BuildingsPage: React.FC = () => {
                             Compliance
                           </span>
                           {renderEfficiencyRating(
-                            building.avgComplianceScore ||
+                            building.avg_compliance_score ||
                               building.compliance_status?.overall_score ||
                               0
                           )}
                         </div>
                       )}
 
-                      {(building.avgPowerFactor ||
+                      {(building.avg_power_factor ||
                         building.performance_summary
-                          ?.energy_intensity_kwh_sqm) && (
+                          ?.monthly_consumption_kwh) && (
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-default-600 flex items-center gap-2">
                             <Zap className="w-4 h-4" />
@@ -1080,14 +1427,14 @@ const BuildingsPage: React.FC = () => {
                           </span>
                           <span className="text-sm font-medium">
                             {safeFormat.number(
-                              building.avgPowerFactor || 0.85,
+                              building.avg_power_factor || 0.85,
                               2
                             )}
                           </span>
                         </div>
                       )}
 
-                      {(building.totalConsumptionKwh ||
+                      {(building.total_consumption_kwh ||
                         building.performance_summary
                           ?.monthly_consumption_kwh) && (
                         <div className="flex justify-between items-center">
@@ -1096,12 +1443,14 @@ const BuildingsPage: React.FC = () => {
                             Monthly kWh
                           </span>
                           <span className="text-sm font-medium">
-                            {getNumericValue(
-                              building.totalConsumptionKwh ||
-                                building.performance_summary
-                                  ?.monthly_consumption_kwh,
-                              0
-                            ).toLocaleString()}
+                            {safeFormat
+                              .getValue(
+                                building.total_consumption_kwh ||
+                                  building.performance_summary
+                                    ?.monthly_consumption_kwh,
+                                0
+                              )
+                              .toLocaleString()}
                           </span>
                         </div>
                       )}
@@ -1110,7 +1459,6 @@ const BuildingsPage: React.FC = () => {
                 </CardBody>
               </div>
 
-              {/* Action Buttons */}
               <div className="px-6 pb-6">
                 <div className="flex gap-2 pt-2">
                   <Button
@@ -1129,8 +1477,7 @@ const BuildingsPage: React.FC = () => {
                     isIconOnly
                     onPress={() => {
                       setSelectedBuilding(building);
-                      prepareEditForm();
-                      onEditOpen();
+                      handleEditOpen();
                     }}
                   >
                     <Edit className="w-3 h-3" />
@@ -1141,55 +1488,24 @@ const BuildingsPage: React.FC = () => {
           ))}
         </div>
 
-        {/* Empty State */}
         {filteredBuildings.length === 0 && !loading && (
           <Card>
             <CardBody className="text-center p-12">
               <Building className="w-16 h-16 text-default-300 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-foreground mb-2">
-                {error ? "Unable to Load Buildings" : "No Buildings Found"}
+                {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                  ? "No Buildings Found"
+                  : "No Buildings Yet"}
               </h3>
               <p className="text-default-500 mb-6">
-                {error ? (
-                  <>
-                    There was an error loading the buildings data.
-                    <br />
-                    <span className="text-sm text-danger mt-2 block">
-                      {error}
-                    </span>
-                  </>
-                ) : searchQuery ||
-                  statusFilter !== "all" ||
-                  typeFilter !== "all" ? (
-                  "Try adjusting your filters to see more results"
-                ) : (
-                  "Get started by adding your first building"
-                )}
+                {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                  ? "Try adjusting your filters to see more results"
+                  : "Get started by adding your first building"}
               </p>
               <div className="flex gap-3 justify-center">
-                {error ? (
-                  <Button
-                    color="primary"
-                    onPress={loadBuildings}
-                    startContent={<RefreshCw className="w-4 h-4" />}
-                    isLoading={loading}
-                  >
-                    Retry Loading
-                  </Button>
-                ) : !searchQuery &&
-                  statusFilter === "all" &&
-                  typeFilter === "all" ? (
-                  <Button
-                    color="primary"
-                    onPress={() => {
-                      resetForm();
-                      onCreateOpen();
-                    }}
-                    startContent={<Plus className="w-4 h-4" />}
-                  >
-                    Add First Building
-                  </Button>
-                ) : (
+                {searchQuery ||
+                statusFilter !== "all" ||
+                typeFilter !== "all" ? (
                   <Button
                     variant="bordered"
                     onPress={() => {
@@ -1200,13 +1516,20 @@ const BuildingsPage: React.FC = () => {
                   >
                     Clear Filters
                   </Button>
+                ) : (
+                  <Button
+                    color="primary"
+                    onPress={handleCreateOpen}
+                    startContent={<Plus className="w-4 h-4" />}
+                  >
+                    Add First Building
+                  </Button>
                 )}
               </div>
             </CardBody>
           </Card>
         )}
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex justify-center">
             <Pagination
@@ -1220,13 +1543,12 @@ const BuildingsPage: React.FC = () => {
           </div>
         )}
 
-        {/* Modals */}
         <BuildingFormModal
           isOpen={isCreateOpen || isEditOpen}
           isEdit={isEditOpen}
           formData={buildingForm}
           onChange={setBuildingForm}
-          onClose={isEditOpen ? onEditClose : onCreateClose}
+          onClose={isEditOpen ? handleEditClose : handleCreateClose}
           onSubmit={() => handleSubmit(isEditOpen)}
           isSubmitting={submitLoading}
         />
@@ -1235,10 +1557,28 @@ const BuildingsPage: React.FC = () => {
     );
   }
 
-  // Building details view
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
+      {successMessage && (
+        <Card className="bg-success-50 border-success-200">
+          <CardBody className="p-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-success-600" />
+              <p className="text-success-800 font-medium">{successMessage}</p>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="light"
+                onPress={() => setSuccessMessage(null)}
+                className="ml-auto"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button
@@ -1282,10 +1622,7 @@ const BuildingsPage: React.FC = () => {
               <DropdownItem
                 key="edit"
                 startContent={<Edit className="w-4 h-4" />}
-                onPress={() => {
-                  prepareEditForm();
-                  onEditOpen();
-                }}
+                onPress={handleEditOpen}
               >
                 Edit Building
               </DropdownItem>
@@ -1294,7 +1631,7 @@ const BuildingsPage: React.FC = () => {
                 startContent={<Trash2 className="w-4 h-4" />}
                 className="text-danger"
                 color="danger"
-                onPress={onDeleteOpen}
+                onPress={handleDeleteOpen}
               >
                 Delete Building
               </DropdownItem>
@@ -1303,7 +1640,6 @@ const BuildingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Building Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-gradient-to-br from-primary/10 to-primary/5">
           <CardBody className="p-4">
@@ -1371,7 +1707,6 @@ const BuildingsPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* Tabs */}
       <Tabs
         selectedKey={selectedTab}
         onSelectionChange={(key) => setSelectedTab(key as string)}
@@ -1395,7 +1730,6 @@ const BuildingsPage: React.FC = () => {
           }
         >
           <div className="mt-6 space-y-6">
-            {/* Building Information */}
             <Card>
               <CardHeader>
                 <h3 className="text-lg font-semibold">Building Information</h3>
@@ -1406,13 +1740,17 @@ const BuildingsPage: React.FC = () => {
                     <p className="text-sm text-default-500 mb-1">
                       Building Name
                     </p>
-                    <p className="font-medium">{selectedBuilding?.name}</p>
+                    <p className="font-medium">
+                      {selectedBuilding?.name || "N/A"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm text-default-500 mb-1">
                       Building Code
                     </p>
-                    <p className="font-medium">{selectedBuilding?.code}</p>
+                    <p className="font-medium">
+                      {selectedBuilding?.code || "N/A"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm text-default-500 mb-1">Status</p>
@@ -1490,7 +1828,6 @@ const BuildingsPage: React.FC = () => {
               </CardBody>
             </Card>
 
-            {/* Performance Summary */}
             {buildingEnergyStats && (
               <Card>
                 <CardHeader>
@@ -1621,6 +1958,7 @@ const BuildingsPage: React.FC = () => {
                       <TableColumn>TYPE</TableColumn>
                       <TableColumn>STATUS</TableColumn>
                       <TableColumn>LOCATION</TableColumn>
+                      <TableColumn>CONDITION</TableColumn>
                       <TableColumn>ACTIONS</TableColumn>
                     </TableHeader>
                     <TableBody>
@@ -1628,7 +1966,9 @@ const BuildingsPage: React.FC = () => {
                         <TableRow key={equipment.id}>
                           <TableCell>
                             <div>
-                              <p className="font-medium">{equipment.name}</p>
+                              <p className="font-medium">
+                                {equipment.name || "Unnamed Equipment"}
+                              </p>
                               {equipment.model && (
                                 <p className="text-sm text-default-500">
                                   {equipment.model}
@@ -1642,7 +1982,8 @@ const BuildingsPage: React.FC = () => {
                               variant="flat"
                               className="capitalize"
                             >
-                              {equipment.equipment_type.replace("_", " ")}
+                              {equipment.equipment_type?.replace("_", " ") ||
+                                "Unknown"}
                             </Chip>
                           </TableCell>
                           <TableCell>
@@ -1653,14 +1994,14 @@ const BuildingsPage: React.FC = () => {
                                   ? "success"
                                   : equipment.status === "maintenance"
                                     ? "warning"
-                                    : equipment.status === "inactive"
+                                    : equipment.status === "faulty"
                                       ? "danger"
                                       : "default"
                               }
                               variant="flat"
                               className="capitalize"
                             >
-                              {equipment.status}
+                              {equipment.status || "Unknown"}
                             </Chip>
                           </TableCell>
                           <TableCell>
@@ -1674,6 +2015,29 @@ const BuildingsPage: React.FC = () => {
                                 </p>
                               )}
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            {equipment.condition_score ? (
+                              <div className="flex items-center gap-2">
+                                <Progress
+                                  value={equipment.condition_score}
+                                  color={
+                                    equipment.condition_score >= 80
+                                      ? "success"
+                                      : equipment.condition_score >= 60
+                                        ? "warning"
+                                        : "danger"
+                                  }
+                                  size="sm"
+                                  className="w-16"
+                                />
+                                <span className="text-sm">
+                                  {equipment.condition_score}%
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-default-400">N/A</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
@@ -1706,742 +2070,14 @@ const BuildingsPage: React.FC = () => {
             )}
           </div>
         </Tab>
-
-        <Tab
-          key="energy"
-          title={
-            <div className="flex items-center space-x-2">
-              <Zap className="w-4 h-4" />
-              <span>Energy</span>
-            </div>
-          }
-        >
-          <div className="mt-6 space-y-6">
-            {buildingEnergyStats ? (
-              <>
-                {/* Energy Statistics */}
-                <Card>
-                  <CardHeader>
-                    <h3 className="text-lg font-semibold">Energy Statistics</h3>
-                  </CardHeader>
-                  <CardBody>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                      <div className="text-center">
-                        <p className="text-sm text-default-500 mb-2">
-                          Total Consumption
-                        </p>
-                        <p className="text-2xl font-bold text-primary">
-                          {safeFormat.integer(
-                            buildingEnergyStats.total_consumption
-                          )}
-                        </p>
-                        <p className="text-sm text-default-500">kWh</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm text-default-500 mb-2">
-                          Total Cost
-                        </p>
-                        <p className="text-2xl font-bold text-success">
-                          ₱{safeFormat.integer(buildingEnergyStats.total_cost)}
-                        </p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm text-default-500 mb-2">
-                          Peak Demand
-                        </p>
-                        <p className="text-2xl font-bold text-warning">
-                          {safeFormat.number(
-                            buildingEnergyStats.peak_demand,
-                            1
-                          )}
-                        </p>
-                        <p className="text-sm text-default-500">kW</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm text-default-500 mb-2">
-                          Efficiency Score
-                        </p>
-                        <p className="text-2xl font-bold text-secondary">
-                          {safeFormat.percentage(
-                            buildingEnergyStats.efficiency_score,
-                            0
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </CardBody>
-                </Card>
-
-                {/* Power Quality Stats */}
-                {buildingPowerQualityStats && (
-                  <Card>
-                    <CardHeader>
-                      <h3 className="text-lg font-semibold">Power Quality</h3>
-                    </CardHeader>
-                    <CardBody>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        <div className="text-center">
-                          <p className="text-sm text-default-500 mb-2">
-                            Quality Score
-                          </p>
-                          <p className="text-2xl font-bold text-primary">
-                            {safeFormat.percentage(
-                              buildingPowerQualityStats?.quality_score,
-                              0
-                            )}
-                          </p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm text-default-500 mb-2">
-                            THD Voltage
-                          </p>
-                          <p className="text-2xl font-bold text-warning">
-                            {safeFormat.percentage(
-                              buildingPowerQualityStats?.thd_voltage_avg,
-                              1
-                            )}
-                          </p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm text-default-500 mb-2">
-                            THD Current
-                          </p>
-                          <p className="text-2xl font-bold text-danger">
-                            {safeFormat.percentage(
-                              buildingPowerQualityStats?.thd_current_avg,
-                              1
-                            )}
-                          </p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm text-default-500 mb-2">
-                            Compliance
-                          </p>
-                          <p className="text-2xl font-bold text-success">
-                            {safeFormat.percentage(
-                              buildingPowerQualityStats?.compliance
-                                ?.overall_compliance,
-                              0
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    </CardBody>
-                  </Card>
-                )}
-              </>
-            ) : (
-              <Card>
-                <CardBody className="text-center py-12">
-                  <Zap className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Energy Data</h3>
-                  <p className="text-default-500">
-                    No energy consumption data available for this building.
-                  </p>
-                </CardBody>
-              </Card>
-            )}
-          </div>
-        </Tab>
-
-        <Tab
-          key="power-quality"
-          title={
-            <div className="flex items-center space-x-2">
-              <Power className="w-4 h-4" />
-              <span>Power Quality</span>
-              {buildingPowerQuality.length > 0 && (
-                <Chip size="sm" color="warning" variant="flat">
-                  {buildingPowerQuality.length}
-                </Chip>
-              )}
-            </div>
-          }
-        >
-          <div className="mt-6">
-            {detailsLoading ? (
-              <div className="flex justify-center py-12">
-                <Spinner size="lg" color="primary" />
-              </div>
-            ) : buildingPowerQuality.length > 0 ? (
-              <Card>
-                <CardBody>
-                  <Table aria-label="Power Quality Events table">
-                    <TableHeader>
-                      <TableColumn>EVENT TYPE</TableColumn>
-                      <TableColumn>SEVERITY</TableColumn>
-                      <TableColumn>MAGNITUDE</TableColumn>
-                      <TableColumn>DURATION</TableColumn>
-                      <TableColumn>TIMESTAMP</TableColumn>
-                    </TableHeader>
-                    <TableBody>
-                      {buildingPowerQuality.map((event) => (
-                        <TableRow key={event.id}>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {event.event_type?.replace("_", " ")}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              color={
-                                event.severity === "critical"
-                                  ? "danger"
-                                  : event.severity === "high"
-                                    ? "warning"
-                                    : event.severity === "medium"
-                                      ? "primary"
-                                      : "default"
-                              }
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {event.severity}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-medium">
-                              {safeFormat.number(event.magnitude, 2)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm">
-                              {event.duration_ms
-                                ? `${event.duration_ms}ms`
-                                : "N/A"}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm">
-                              {event.start_time
-                                ? new Date(event.start_time).toLocaleString()
-                                : "N/A"}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardBody>
-              </Card>
-            ) : (
-              <Card>
-                <CardBody className="text-center py-12">
-                  <Power className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">
-                    No Power Quality Events
-                  </h3>
-                  <p className="text-default-500">
-                    No power quality events detected for this building.
-                  </p>
-                </CardBody>
-              </Card>
-            )}
-          </div>
-        </Tab>
-
-        <Tab
-          key="maintenance"
-          title={
-            <div className="flex items-center space-x-2">
-              <Construction className="w-4 h-4" />
-              <span>Maintenance</span>
-              {maintenanceSchedule?.summary?.overdue &&
-                maintenanceSchedule.summary.overdue > 0 && (
-                  <Chip size="sm" color="danger" variant="flat">
-                    {maintenanceSchedule.summary.overdue}
-                  </Chip>
-                )}
-            </div>
-          }
-        >
-          <div className="mt-6">
-            {detailsLoading ? (
-              <div className="flex justify-center py-12">
-                <Spinner size="lg" color="primary" />
-              </div>
-            ) : maintenanceSchedule ? (
-              <div className="space-y-6">
-                {/* Maintenance Summary */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <Card className="bg-gradient-to-br from-primary/10 to-primary/5">
-                    <CardBody className="p-4 text-center">
-                      <p className="text-sm text-default-500">
-                        Total Equipment
-                      </p>
-                      <p className="text-2xl font-bold text-primary">
-                        {maintenanceSchedule?.summary?.total_equipment || 0}
-                      </p>
-                    </CardBody>
-                  </Card>
-                  <Card className="bg-gradient-to-br from-warning/10 to-warning/5">
-                    <CardBody className="p-4 text-center">
-                      <p className="text-sm text-default-500">Due Soon</p>
-                      <p className="text-2xl font-bold text-warning">
-                        {maintenanceSchedule?.summary?.due_soon || 0}
-                      </p>
-                    </CardBody>
-                  </Card>
-                  <Card className="bg-gradient-to-br from-danger/10 to-danger/5">
-                    <CardBody className="p-4 text-center">
-                      <p className="text-sm text-default-500">Overdue</p>
-                      <p className="text-2xl font-bold text-danger">
-                        {maintenanceSchedule?.summary?.overdue || 0}
-                      </p>
-                    </CardBody>
-                  </Card>
-                  <Card className="bg-gradient-to-br from-success/10 to-success/5">
-                    <CardBody className="p-4 text-center">
-                      <p className="text-sm text-default-500">In Maintenance</p>
-                      <p className="text-2xl font-bold text-success">
-                        {maintenanceSchedule?.summary?.in_maintenance || 0}
-                      </p>
-                    </CardBody>
-                  </Card>
-                </div>
-
-                {/* Maintenance Schedule Table */}
-                <Card>
-                  <CardBody>
-                    <Table aria-label="Maintenance Schedule table">
-                      <TableHeader>
-                        <TableColumn>EQUIPMENT</TableColumn>
-                        <TableColumn>TYPE</TableColumn>
-                        <TableColumn>STATUS</TableColumn>
-                        <TableColumn>NEXT DUE</TableColumn>
-                        <TableColumn>RISK LEVEL</TableColumn>
-                        <TableColumn>URGENCY</TableColumn>
-                      </TableHeader>
-                      <TableBody>
-                        {(maintenanceSchedule?.schedule || []).map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{item.name}</p>
-                                <p className="text-sm text-default-500">
-                                  {item.building_name}
-                                </p>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="sm"
-                                variant="flat"
-                                className="capitalize"
-                              >
-                                {item.equipment_type?.replace("_", " ") ||
-                                  "Unknown"}
-                              </Chip>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="sm"
-                                color={
-                                  item.maintenance_status === "overdue"
-                                    ? "danger"
-                                    : item.maintenance_status === "due_soon"
-                                      ? "warning"
-                                      : "success"
-                                }
-                                variant="flat"
-                                className="capitalize"
-                              >
-                                {item.maintenance_status?.replace("_", " ") ||
-                                  "Unknown"}
-                              </Chip>
-                            </TableCell>
-                            <TableCell>
-                              <div>
-                                <p className="text-sm">
-                                  {item.next_maintenance_date
-                                    ? new Date(
-                                        item.next_maintenance_date
-                                      ).toLocaleDateString()
-                                    : "N/A"}
-                                </p>
-                                <p className="text-xs text-default-500">
-                                  {item.days_until_due !== undefined
-                                    ? item.days_until_due > 0
-                                      ? `${item.days_until_due} days`
-                                      : `${Math.abs(item.days_until_due)} days overdue`
-                                    : "N/A"}
-                                </p>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="sm"
-                                color={
-                                  item.maintenance_risk_level === "critical"
-                                    ? "danger"
-                                    : item.maintenance_risk_level === "high"
-                                      ? "warning"
-                                      : item.maintenance_risk_level === "medium"
-                                        ? "primary"
-                                        : "default"
-                                }
-                                variant="flat"
-                                className="capitalize"
-                              >
-                                {item.maintenance_risk_level || "Unknown"}
-                              </Chip>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Progress
-                                  value={safeFormat.getValue(
-                                    item.urgency_score,
-                                    0
-                                  )}
-                                  color={
-                                    safeFormat.getValue(
-                                      item.urgency_score,
-                                      0
-                                    ) >= 80
-                                      ? "danger"
-                                      : safeFormat.getValue(
-                                            item.urgency_score,
-                                            0
-                                          ) >= 60
-                                        ? "warning"
-                                        : "success"
-                                  }
-                                  size="sm"
-                                  className="w-16"
-                                />
-                                <span className="text-sm">
-                                  {safeFormat.percentage(item.urgency_score, 0)}
-                                </span>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </CardBody>
-                </Card>
-              </div>
-            ) : (
-              <Card>
-                <CardBody className="text-center py-12">
-                  <Construction className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">
-                    No Maintenance Data
-                  </h3>
-                  <p className="text-default-500">
-                    No maintenance schedule available for this building.
-                  </p>
-                </CardBody>
-              </Card>
-            )}
-          </div>
-        </Tab>
-
-        <Tab
-          key="audits"
-          title={
-            <div className="flex items-center space-x-2">
-              <CheckCircle className="w-4 h-4" />
-              <span>Audits</span>
-              {buildingAudits.length > 0 && (
-                <Chip size="sm" color="primary" variant="flat">
-                  {buildingAudits.length}
-                </Chip>
-              )}
-            </div>
-          }
-        >
-          <div className="mt-6">
-            {detailsLoading ? (
-              <div className="flex justify-center py-12">
-                <Spinner size="lg" color="primary" />
-              </div>
-            ) : buildingAudits.length > 0 ? (
-              <Card>
-                <CardBody>
-                  <Table aria-label="Audits table">
-                    <TableHeader>
-                      <TableColumn>AUDIT</TableColumn>
-                      <TableColumn>TYPE</TableColumn>
-                      <TableColumn>STATUS</TableColumn>
-                      <TableColumn>COMPLIANCE SCORE</TableColumn>
-                      <TableColumn>DATE</TableColumn>
-                      <TableColumn>AUDITOR</TableColumn>
-                    </TableHeader>
-                    <TableBody>
-                      {buildingAudits.map((audit) => (
-                        <TableRow key={audit.id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{audit.title}</p>
-                              {audit.description && (
-                                <p className="text-sm text-default-500 line-clamp-1">
-                                  {audit.description}
-                                </p>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {audit.audit_type?.replace("_", " ")}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              color={
-                                audit.status === "completed"
-                                  ? "success"
-                                  : audit.status === "in_progress"
-                                    ? "warning"
-                                    : audit.status === "planned"
-                                      ? "primary"
-                                      : "default"
-                              }
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {audit.status?.replace("_", " ")}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            {audit.compliance_score ? (
-                              <div className="flex items-center gap-2">
-                                <Progress
-                                  value={audit.compliance_score}
-                                  color={
-                                    audit.compliance_score >= 80
-                                      ? "success"
-                                      : audit.compliance_score >= 60
-                                        ? "warning"
-                                        : "danger"
-                                  }
-                                  size="sm"
-                                  className="w-16"
-                                />
-                                <span className="text-sm">
-                                  {audit.compliance_score}%
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-default-400">N/A</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {audit.actual_end_date ? (
-                              <div>
-                                <p className="text-sm">
-                                  {new Date(
-                                    audit.actual_end_date
-                                  ).toLocaleDateString()}
-                                </p>
-                                <p className="text-xs text-default-500">
-                                  Completed
-                                </p>
-                              </div>
-                            ) : audit.planned_start_date ? (
-                              <div>
-                                <p className="text-sm">
-                                  {new Date(
-                                    audit.planned_start_date
-                                  ).toLocaleDateString()}
-                                </p>
-                                <p className="text-xs text-default-500">
-                                  Scheduled
-                                </p>
-                              </div>
-                            ) : (
-                              <span className="text-default-400">N/A</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {audit.auditor_name ? (
-                              <div className="flex items-center gap-2">
-                                <Avatar size="sm" name={audit.auditor_name} />
-                                <span className="text-sm">
-                                  {audit.auditor_name}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-default-400">N/A</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardBody>
-              </Card>
-            ) : (
-              <Card>
-                <CardBody className="text-center py-12">
-                  <CheckCircle className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">
-                    No Audits Found
-                  </h3>
-                  <p className="text-default-500">
-                    No audits have been conducted for this building yet.
-                  </p>
-                </CardBody>
-              </Card>
-            )}
-          </div>
-        </Tab>
-
-        <Tab
-          key="alerts"
-          title={
-            <div className="flex items-center space-x-2">
-              <AlertTriangle className="w-4 h-4" />
-              <span>Alerts</span>
-              {buildingAlerts.filter((a) => a.status === "active").length >
-                0 && (
-                <Chip size="sm" color="danger" variant="flat">
-                  {buildingAlerts.filter((a) => a.status === "active").length}
-                </Chip>
-              )}
-            </div>
-          }
-        >
-          <div className="mt-6">
-            {detailsLoading ? (
-              <div className="flex justify-center py-12">
-                <Spinner size="lg" color="primary" />
-              </div>
-            ) : buildingAlerts.length > 0 ? (
-              <Card>
-                <CardBody>
-                  <Table aria-label="Alerts table">
-                    <TableHeader>
-                      <TableColumn>ALERT</TableColumn>
-                      <TableColumn>TYPE</TableColumn>
-                      <TableColumn>SEVERITY</TableColumn>
-                      <TableColumn>STATUS</TableColumn>
-                      <TableColumn>EQUIPMENT</TableColumn>
-                      <TableColumn>AGE</TableColumn>
-                    </TableHeader>
-                    <TableBody>
-                      {buildingAlerts.map((alert) => (
-                        <TableRow key={alert.id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{alert.title}</p>
-                              <p className="text-sm text-default-500 line-clamp-1">
-                                {alert.message}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {alert.type?.replace("_", " ")}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              color={
-                                alert.severity === "critical"
-                                  ? "danger"
-                                  : alert.severity === "high"
-                                    ? "warning"
-                                    : alert.severity === "medium"
-                                      ? "primary"
-                                      : "default"
-                              }
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {alert.severity}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="sm"
-                              color={
-                                alert.status === "active"
-                                  ? "danger"
-                                  : alert.status === "acknowledged"
-                                    ? "warning"
-                                    : alert.status === "resolved"
-                                      ? "success"
-                                      : "default"
-                              }
-                              variant="flat"
-                              className="capitalize"
-                            >
-                              {alert.status}
-                            </Chip>
-                          </TableCell>
-                          <TableCell>
-                            {alert.equipment_name ? (
-                              <div>
-                                <p className="text-sm font-medium">
-                                  {alert.equipment_name}
-                                </p>
-                                {alert.equipment_id && (
-                                  <p className="text-xs text-default-500">
-                                    ID: {alert.equipment_id}
-                                  </p>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-default-400">N/A</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {alert.age_minutes ? (
-                              <span className="text-sm">
-                                {alert.age_minutes < 60
-                                  ? `${alert.age_minutes}m`
-                                  : alert.age_minutes < 1440
-                                    ? `${Math.floor(alert.age_minutes / 60)}h`
-                                    : `${Math.floor(alert.age_minutes / 1440)}d`}
-                              </span>
-                            ) : (
-                              <span className="text-default-400">N/A</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardBody>
-              </Card>
-            ) : (
-              <Card>
-                <CardBody className="text-center py-12">
-                  <AlertTriangle className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Alerts</h3>
-                  <p className="text-default-500">
-                    This building has no active alerts.
-                  </p>
-                </CardBody>
-              </Card>
-            )}
-          </div>
-        </Tab>
       </Tabs>
 
-      {/* Modals */}
       <BuildingFormModal
         isOpen={isCreateOpen || isEditOpen}
         isEdit={isEditOpen}
         formData={buildingForm}
         onChange={setBuildingForm}
-        onClose={isEditOpen ? onEditClose : onCreateClose}
+        onClose={isEditOpen ? handleEditClose : handleCreateClose}
         onSubmit={() => handleSubmit(isEditOpen)}
         isSubmitting={submitLoading}
       />

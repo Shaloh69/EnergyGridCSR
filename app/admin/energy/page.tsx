@@ -49,15 +49,18 @@ import {
   BarChart3,
   Eye,
   Leaf,
+  AlertCircle,
 } from "lucide-react";
 
 // API and Types
 import { energyAPI, buildingsAPI } from "@/lib/api";
 import {
-  EnergyConsumptionData,
-  DailyEnergyData,
   Building,
-} from "@/types/admin";
+  EnergyReading,
+  EnergyQueryParams,
+  BuildingQueryParams,
+  ApiResponse,
+} from "@/types/api-types";
 
 const COLORS = {
   primary: "#00C896",
@@ -74,6 +77,56 @@ const intervalOptions = [
   { key: "monthly", label: "Monthly" },
 ];
 
+const energyTypeOptions = [
+  { key: "electrical", label: "Electrical" },
+  { key: "solar", label: "Solar" },
+  { key: "generator", label: "Generator" },
+  { key: "others", label: "Others" },
+];
+
+interface EnergyConsumptionData {
+  building_id: number;
+  period: {
+    start_date: string;
+    end_date: string;
+    interval: "hourly" | "daily" | "weekly" | "monthly";
+  };
+  summary: {
+    total_consumption_kwh: number;
+    total_cost_php: number;
+    average_daily_consumption: number;
+    peak_demand_kw: number;
+    average_power_factor: number;
+    carbon_footprint_kg_co2: number;
+  };
+  daily_data: DailyEnergyData[];
+  analytics: {
+    efficiency_rating: string;
+    baseline_comparison: {
+      variance_percentage: number;
+      trend: "increasing" | "decreasing" | "stable";
+    };
+    cost_optimization: {
+      potential_monthly_savings: number;
+      recommendations: string[];
+    };
+  };
+}
+
+interface DailyEnergyData {
+  date: string;
+  consumption_kwh: number;
+  reactive_power_kvarh?: number;
+  power_factor: number;
+  peak_demand_kw: number;
+  cost_php: number;
+  cost_breakdown: {
+    energy_charge: number;
+    demand_charge: number;
+    taxes_and_fees: number;
+  };
+}
+
 export default function EnergyPage() {
   const [energyData, setEnergyData] = useState<EnergyConsumptionData | null>(
     null
@@ -81,6 +134,7 @@ export default function EnergyPage() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Filters
   const [selectedBuilding, setSelectedBuilding] = useState<string>("");
@@ -100,17 +154,20 @@ export default function EnergyPage() {
     onOpen: onAddOpen,
     onClose: onAddClose,
   } = useDisclosure();
+
   const [readingForm, setReadingForm] = useState({
     building_id: "",
-    active_power_kwh: "",
+    consumption_kwh: "",
     reactive_power_kvarh: "",
     power_factor: "",
     voltage_v: "",
     current_a: "",
     frequency_hz: "",
-    peak_demand_kw: "",
+    demand_kw: "",
+    energy_type: "electrical",
     temperature_c: "",
     humidity_percent: "",
+    cost_php: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -127,19 +184,32 @@ export default function EnergyPage() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
+      setError(null);
 
-      const buildingsRes = await buildingsAPI.getAll({ status: "active" });
+      const buildingParams: BuildingQueryParams = {
+        status: "active",
+        sortBy: "name",
+        sortOrder: "ASC",
+      };
+
+      const buildingsRes = await buildingsAPI.getAll(buildingParams);
+
       if (buildingsRes.data.success) {
-        const buildingData = buildingsRes.data.data.buildings;
-        setBuildings(buildingData);
+        const buildingData = buildingsRes.data.data;
+        setBuildings(Array.isArray(buildingData) ? buildingData : []);
 
         // Auto-select first building
-        if (buildingData.length > 0) {
+        if (buildingData && buildingData.length > 0) {
           setSelectedBuilding(buildingData[0].id.toString());
         }
+      } else {
+        throw new Error(
+          buildingsRes.data.message || "Failed to load buildings"
+        );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to load initial data:", error);
+      setError(error.message || "Failed to load buildings");
     } finally {
       setLoading(false);
     }
@@ -150,22 +220,28 @@ export default function EnergyPage() {
 
     try {
       setChartLoading(true);
+      setError(null);
 
-      const params = {
-        building_id: selectedBuilding,
+      const params: EnergyQueryParams = {
+        building_id: parseInt(selectedBuilding),
         start_date: startDate,
         end_date: endDate,
-        interval,
+        interval: interval as "hourly" | "daily" | "weekly" | "monthly",
         include_cost: true,
+        include_quality_assessment: true,
+        include_environmental_impact: true,
       };
 
       const response = await energyAPI.getConsumption(params);
 
       if (response.data.success) {
         setEnergyData(response.data.data);
+      } else {
+        throw new Error(response.data.message || "Failed to load energy data");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to load energy data:", error);
+      setError(error.message || "Failed to load energy data");
     } finally {
       setChartLoading(false);
     }
@@ -174,23 +250,50 @@ export default function EnergyPage() {
   const handleAddReading = async () => {
     try {
       setSubmitting(true);
+      setError(null);
 
-      const readingData = {
-        building_id: Number(readingForm.building_id),
-        active_power_kwh: Number(readingForm.active_power_kwh),
-        reactive_power_kvarh: Number(readingForm.reactive_power_kvarh),
-        power_factor: Number(readingForm.power_factor),
-        voltage_v: Number(readingForm.voltage_v),
-        current_a: Number(readingForm.current_a),
-        frequency_hz: Number(readingForm.frequency_hz),
-        peak_demand_kw: Number(readingForm.peak_demand_kw),
+      // Validate required fields
+      if (!readingForm.building_id || !readingForm.consumption_kwh) {
+        throw new Error("Building and consumption are required");
+      }
+
+      const readingData: Partial<EnergyReading> = {
+        building_id: parseInt(readingForm.building_id),
+        consumption_kwh: parseFloat(readingForm.consumption_kwh),
+        reactive_power_kvarh: readingForm.reactive_power_kvarh
+          ? parseFloat(readingForm.reactive_power_kvarh)
+          : undefined,
+        power_factor: readingForm.power_factor
+          ? parseFloat(readingForm.power_factor)
+          : undefined,
+        voltage_v: readingForm.voltage_v
+          ? parseFloat(readingForm.voltage_v)
+          : undefined,
+        current_a: readingForm.current_a
+          ? parseFloat(readingForm.current_a)
+          : undefined,
+        frequency_hz: readingForm.frequency_hz
+          ? parseFloat(readingForm.frequency_hz)
+          : undefined,
+        demand_kw: readingForm.demand_kw
+          ? parseFloat(readingForm.demand_kw)
+          : undefined,
+        energy_type: readingForm.energy_type as
+          | "electrical"
+          | "solar"
+          | "generator"
+          | "others",
         temperature_c: readingForm.temperature_c
-          ? Number(readingForm.temperature_c)
+          ? parseFloat(readingForm.temperature_c)
           : undefined,
         humidity_percent: readingForm.humidity_percent
-          ? Number(readingForm.humidity_percent)
+          ? parseFloat(readingForm.humidity_percent)
+          : undefined,
+        cost_php: readingForm.cost_php
+          ? parseFloat(readingForm.cost_php)
           : undefined,
         recorded_at: new Date().toISOString(),
+        reading_type: "manual",
       };
 
       const response = await energyAPI.createReading(readingData);
@@ -199,9 +302,12 @@ export default function EnergyPage() {
         await loadEnergyData();
         onAddClose();
         resetReadingForm();
+      } else {
+        throw new Error(response.data.message || "Failed to add reading");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to add reading:", error);
+      setError(error.message || "Failed to add reading");
     } finally {
       setSubmitting(false);
     }
@@ -210,15 +316,17 @@ export default function EnergyPage() {
   const resetReadingForm = () => {
     setReadingForm({
       building_id: selectedBuilding,
-      active_power_kwh: "",
+      consumption_kwh: "",
       reactive_power_kvarh: "",
       power_factor: "",
       voltage_v: "",
       current_a: "",
       frequency_hz: "",
-      peak_demand_kw: "",
+      demand_kw: "",
+      energy_type: "electrical",
       temperature_c: "",
       humidity_percent: "",
+      cost_php: "",
     });
   };
 
@@ -227,41 +335,41 @@ export default function EnergyPage() {
   );
 
   // Chart data transformations
-  const consumptionChartData =
-    energyData?.daily_data.map((item) => ({
-      date: new Date(item.date).toLocaleDateString(),
-      consumption: item.active_power_kwh,
-      cost: item.cost_php,
-      powerFactor: item.power_factor,
-      demand: item.peak_demand_kw,
-    })) || [];
+  const consumptionChartData = useMemo(() => {
+    return (
+      energyData?.daily_data?.map((item) => ({
+        date: new Date(item.date).toLocaleDateString(),
+        consumption: item.consumption_kwh,
+        cost: item.cost_php,
+        powerFactor: item.power_factor,
+        demand: item.peak_demand_kw,
+      })) || []
+    );
+  }, [energyData]);
 
-  const costBreakdownData =
-    energyData?.daily_data.length > 0
-      ? [
-          {
-            name: "Energy Charge",
-            value:
-              energyData.daily_data[energyData.daily_data.length - 1]
-                .cost_breakdown.energy_charge,
-            color: COLORS.primary,
-          },
-          {
-            name: "Demand Charge",
-            value:
-              energyData.daily_data[energyData.daily_data.length - 1]
-                .cost_breakdown.demand_charge,
-            color: COLORS.secondary,
-          },
-          {
-            name: "Taxes & Fees",
-            value:
-              energyData.daily_data[energyData.daily_data.length - 1]
-                .cost_breakdown.taxes_and_fees,
-            color: COLORS.warning,
-          },
-        ]
-      : [];
+  const costBreakdownData = useMemo(() => {
+    if (!energyData?.daily_data || energyData.daily_data.length === 0)
+      return [];
+
+    const latestData = energyData.daily_data[energyData.daily_data.length - 1];
+    return [
+      {
+        name: "Energy Charge",
+        value: latestData.cost_breakdown.energy_charge,
+        color: COLORS.primary,
+      },
+      {
+        name: "Demand Charge",
+        value: latestData.cost_breakdown.demand_charge,
+        color: COLORS.secondary,
+      },
+      {
+        name: "Taxes & Fees",
+        value: latestData.cost_breakdown.taxes_and_fees,
+        color: COLORS.warning,
+      },
+    ];
+  }, [energyData]);
 
   const getEfficiencyColor = (rating: string) => {
     switch (rating.toLowerCase()) {
@@ -297,11 +405,13 @@ export default function EnergyPage() {
 
   // Fixed selection handlers
   const handleBuildingFilterChange = (keys: any) => {
-    setSelectedBuilding((Array.from(keys)[0] as string) || "");
+    const selectedKey = Array.from(keys)[0] as string;
+    setSelectedBuilding(selectedKey || "");
   };
 
   const handleIntervalChange = (keys: any) => {
-    setInterval((Array.from(keys)[0] as string) || "daily");
+    const selectedKey = Array.from(keys)[0] as string;
+    setInterval(selectedKey || "daily");
   };
 
   if (loading) {
@@ -363,6 +473,28 @@ export default function EnergyPage() {
         </Button>
       </div>
 
+      {/* Error Display */}
+      {error && (
+        <Card className="border-l-4 border-l-danger">
+          <CardBody className="p-4">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="w-5 h-5 text-danger" />
+              <span className="text-danger font-medium">Error</span>
+            </div>
+            <p className="text-sm text-default-600 mt-1">{error}</p>
+            <Button
+              size="sm"
+              variant="light"
+              color="danger"
+              className="mt-2"
+              onPress={() => setError(null)}
+            >
+              Dismiss
+            </Button>
+          </CardBody>
+        </Card>
+      )}
+
       {/* Filters */}
       <Card>
         <CardBody>
@@ -372,6 +504,7 @@ export default function EnergyPage() {
               placeholder="Select building"
               selectedKeys={selectedBuilding ? [selectedBuilding] : []}
               onSelectionChange={handleBuildingFilterChange}
+              isRequired
             >
               {buildingFilterOptions.map((option) => (
                 <SelectItem key={option.key}>{option.label}</SelectItem>
@@ -383,6 +516,7 @@ export default function EnergyPage() {
               label="Start Date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
+              isRequired
             />
 
             <Input
@@ -390,6 +524,7 @@ export default function EnergyPage() {
               label="End Date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
+              isRequired
             />
 
             <Select
@@ -577,7 +712,7 @@ export default function EnergyPage() {
                         Energy Intensity
                       </span>
                       <span className="font-medium">
-                        {selectedBuildingData
+                        {selectedBuildingData?.area_sqm
                           ? (
                               energyData.summary.total_consumption_kwh /
                               selectedBuildingData.area_sqm
@@ -637,14 +772,14 @@ export default function EnergyPage() {
               </CardBody>
             </Card>
 
-            {/* Cost Analysis */}
+            {/* Cost Breakdown */}
             <Card>
               <CardHeader>
                 <h3 className="text-lg font-semibold">Cost Breakdown</h3>
               </CardHeader>
               <CardBody>
                 <div className="h-80">
-                  {chartLoading ? (
+                  {chartLoading || costBreakdownData.length === 0 ? (
                     <Skeleton className="h-full rounded-lg" />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
@@ -791,6 +926,7 @@ export default function EnergyPage() {
                       building_id: (Array.from(keys)[0] as string) || "",
                     }))
                   }
+                  isRequired
                 >
                   {buildingFilterOptions.map((option) => (
                     <SelectItem key={option.key}>{option.label}</SelectItem>
@@ -799,16 +935,17 @@ export default function EnergyPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Input
-                    label="Active Power (kWh)"
+                    label="Consumption (kWh)"
                     type="number"
                     step="0.01"
-                    value={readingForm.active_power_kwh}
+                    value={readingForm.consumption_kwh}
                     onChange={(e) =>
                       setReadingForm((prev) => ({
                         ...prev,
-                        active_power_kwh: e.target.value,
+                        consumption_kwh: e.target.value,
                       }))
                     }
+                    isRequired
                   />
 
                   <Input
@@ -868,7 +1005,7 @@ export default function EnergyPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <Input
                     label="Frequency (Hz)"
                     type="number"
@@ -883,20 +1020,49 @@ export default function EnergyPage() {
                   />
 
                   <Input
-                    label="Peak Demand (kW)"
+                    label="Demand (kW)"
                     type="number"
                     step="0.01"
-                    value={readingForm.peak_demand_kw}
+                    value={readingForm.demand_kw}
                     onChange={(e) =>
                       setReadingForm((prev) => ({
                         ...prev,
-                        peak_demand_kw: e.target.value,
+                        demand_kw: e.target.value,
+                      }))
+                    }
+                  />
+
+                  <Input
+                    label="Cost (PHP)"
+                    type="number"
+                    step="0.01"
+                    value={readingForm.cost_php}
+                    onChange={(e) =>
+                      setReadingForm((prev) => ({
+                        ...prev,
+                        cost_php: e.target.value,
                       }))
                     }
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Select
+                    label="Energy Type"
+                    selectedKeys={[readingForm.energy_type]}
+                    onSelectionChange={(keys) =>
+                      setReadingForm((prev) => ({
+                        ...prev,
+                        energy_type:
+                          (Array.from(keys)[0] as string) || "electrical",
+                      }))
+                    }
+                  >
+                    {energyTypeOptions.map((option) => (
+                      <SelectItem key={option.key}>{option.label}</SelectItem>
+                    ))}
+                  </Select>
+
                   <Input
                     label="Temperature (°C)"
                     type="number"
@@ -934,6 +1100,9 @@ export default function EnergyPage() {
                   color="primary"
                   onPress={handleAddReading}
                   isLoading={submitting}
+                  isDisabled={
+                    !readingForm.building_id || !readingForm.consumption_kwh
+                  }
                 >
                   Add Reading
                 </Button>

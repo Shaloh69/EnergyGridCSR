@@ -1,4 +1,4 @@
-// app/admin/compliance/page.tsx - FULLY FIXED VERSION
+// app/admin/compliance/page.tsx - FULLY FIXED VERSION WITH PROPER API INTEGRATION
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -51,25 +51,29 @@ import {
   Search,
 } from "lucide-react";
 
-// ✅ FIXED: Correct API and Types imports
+// ✅ FIXED: Correct API imports aligned with your system
 import {
   complianceAPI,
   auditsAPI,
   buildingsAPI,
   dashboardAPI,
 } from "@/lib/api";
-import {
+
+// ✅ FIXED: Proper type imports from your API types
+import type {
   Audit,
   Building,
   ComplianceCheck,
   AuditSummary,
   ComplianceSummary,
+  ApiResponse,
   ApiError,
-} from "@/types/admin";
-import { AuditQueryParams } from "@/types/api-types";
+  AuditQueryParams,
+} from "@/types/api-types";
+
 import { AxiosError } from "axios";
 
-// ✅ FIXED: Proper interfaces based on actual API responses
+// ✅ FIXED: Interfaces aligned with your actual API responses
 interface ComplianceOverview {
   audit_id: number;
   overall_compliance: {
@@ -78,16 +82,27 @@ interface ComplianceOverview {
     total_checks: number;
     passed_checks: number;
     failed_checks: number;
+    warnings: number;
   };
   standards_summary: StandardSummary[];
   detailed_checks: ComplianceCheck[];
+  recommendations: string[];
+  risk_assessment: {
+    level: "low" | "medium" | "high" | "critical";
+    critical_issues: number;
+    major_issues: number;
+    minor_issues: number;
+  };
 }
 
 interface StandardSummary {
   standard: string;
   score: number;
-  status: string;
+  status: "compliant" | "non_compliant" | "partially_compliant";
   violations: number;
+  last_assessment: string;
+  requirements_met: number;
+  total_requirements: number;
 }
 
 interface ComplianceTrends {
@@ -98,13 +113,19 @@ interface ComplianceTrends {
   };
   trends: TrendDataPoint[];
   analysis: {
-    trend_direction: string;
+    trend_direction: "improving" | "stable" | "declining";
     improvement_rate: number;
     best_performing_standard: string;
     worst_performing_standard: string;
     recent_improvement: boolean;
     target_compliance_rate: number;
     gap_to_target: number;
+  };
+  performance_metrics: {
+    monthly_average: number;
+    quarterly_average: number;
+    yearly_average: number;
+    consistency_score: number;
   };
 }
 
@@ -117,6 +138,7 @@ interface TrendDataPoint {
   standard_breakdown: Record<string, number>;
 }
 
+// ✅ FIXED: Compliance standards based on your API types
 const complianceStandards = [
   {
     key: "PEC2017",
@@ -134,11 +156,10 @@ const complianceStandards = [
     color: "warning" as const,
   },
   {
-    key: "IEEE519",
-    name: "IEEE 519",
-    title: "Power Quality & Harmonic Compliance",
-    description:
-      "Recommended practices for harmonic control in electric power systems",
+    key: "ISO25010",
+    name: "ISO 25010",
+    title: "Quality Evaluation Framework",
+    description: "Software and system quality evaluation standards",
     color: "secondary" as const,
   },
   {
@@ -148,17 +169,10 @@ const complianceStandards = [
     description: "Philippine energy efficiency and conservation requirements",
     color: "success" as const,
   },
-  {
-    key: "NEMA",
-    name: "NEMA",
-    title: "National Electrical Manufacturers Association",
-    description: "Electrical equipment standards and guidelines",
-    color: "danger" as const,
-  },
 ];
 
 export default function ComprehensiveCompliancePage() {
-  // ✅ FIXED: Proper state typing
+  // ✅ FIXED: Proper state typing with your API types
   const [complianceData, setComplianceData] =
     useState<ComplianceOverview | null>(null);
   const [complianceTrends, setComplianceTrends] =
@@ -179,8 +193,6 @@ export default function ComprehensiveCompliancePage() {
   const [standardFilter, setStandardFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
-  const [complianceScoreFilter, setComplianceScoreFilter] =
-    useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
@@ -220,19 +232,32 @@ export default function ComprehensiveCompliancePage() {
     null
   );
 
-  // Form data for compliance checks
+  // ✅ FIXED: Form data aligned with your API validation
   const [checkParams, setCheckParams] = useState({
-    audit_id: "",
-    building_id: "",
-    standards: [] as string[],
-    check_type: "comprehensive",
-    power_quality_data: {
-      voltage_thd_l1: "",
-      power_factor: "",
-    },
-    safety_inspection: {
-      electrical_panel_clearance_m: "",
-      fire_extinguisher_count: "",
+    auditId: "", // Changed from audit_id to match frontend naming
+    buildingId: "", // Changed from building_id to match frontend naming
+    standardType: "PEC2017" as "PEC2017" | "OSHS" | "ISO25010" | "RA11285",
+    checkData: {
+      power_quality_readings: {
+        voltage_thd_l1: "",
+        voltage_thd_l2: "",
+        voltage_thd_l3: "",
+        thd_current: "",
+        power_factor: "",
+        voltage_unbalance: "",
+        frequency: "",
+      },
+      safety_inspection: {
+        electrical_panel_clearance_m: "",
+        fire_extinguisher_count: "",
+        emergency_exit_clearance: "",
+        ground_fault_protection: false,
+      },
+      energy_efficiency: {
+        power_factor_target: "0.95",
+        energy_consumption_target: "",
+        demand_factor: "",
+      },
     },
   });
 
@@ -241,7 +266,8 @@ export default function ComprehensiveCompliancePage() {
     standard: "",
     requirement_code: "",
     requirement_title: "",
-    status: "warning" as
+    requirement_description: "",
+    status: "not_checked" as
       | "passed"
       | "failed"
       | "warning"
@@ -252,16 +278,27 @@ export default function ComprehensiveCompliancePage() {
     corrective_action: "",
     target_completion_date: "",
     responsible_party: "",
+    evidence: "",
   });
 
-  // ✅ FIXED: Proper error handling helper following development guide
+  // ✅ FIXED: Error handling aligned with your API error structure
   const handleApiError = (error: unknown, operation: string): string => {
     console.error(`${operation} failed:`, error);
 
     if (error && typeof error === "object" && "response" in error) {
       const axiosError = error as AxiosError<ApiError>;
+
+      // Handle validation errors
+      if (axiosError.response?.data?.validation_errors) {
+        const validationMessages = axiosError.response.data.validation_errors
+          .map((err) => `${err.field}: ${err.message}`)
+          .join(", ");
+        return `Validation error: ${validationMessages}`;
+      }
+
       const message =
         axiosError.response?.data?.message ||
+        axiosError.response?.data?.error ||
         axiosError.message ||
         `${operation} failed`;
       return message;
@@ -274,145 +311,99 @@ export default function ComprehensiveCompliancePage() {
     return `${operation} failed`;
   };
 
-  // ✅ FIXED: Safe number helpers following development guide
+  // ✅ FIXED: Safe number helpers
   const safeToFixed = (value: any, decimals: number = 1): string => {
-    if (value === null || value === undefined || value === "") {
-      return "0.0";
-    }
+    if (value === null || value === undefined || value === "") return "0.0";
     const numValue = typeof value === "string" ? parseFloat(value) : value;
     return isNaN(numValue) ? "0.0" : numValue.toFixed(decimals);
   };
 
   const safeNumber = (value: any, defaultValue: number = 0): number => {
-    if (value === null || value === undefined || value === "") {
+    if (value === null || value === undefined || value === "")
       return defaultValue;
-    }
     const numValue = typeof value === "string" ? parseFloat(value) : value;
     return isNaN(numValue) ? defaultValue : numValue;
   };
 
   const safeInteger = (value: any, defaultValue: number = 0): number => {
-    if (value === null || value === undefined || value === "") {
+    if (value === null || value === undefined || value === "")
       return defaultValue;
-    }
     const numValue = typeof value === "string" ? parseInt(value, 10) : value;
     return isNaN(numValue) ? defaultValue : numValue;
   };
 
-  // ✅ FIXED: Proper API loading with defensive programming
+  // ✅ FIXED: API loading with proper error handling and retry logic
   const loadInitialData = async () => {
     try {
       setLoading(true);
       setError(null);
       console.log("🔄 Loading initial data for compliance page...");
 
-      // ✅ FIXED: Progressive fallback strategy to handle API validation mismatches
+      // ✅ FIXED: Load audits with proper fallback strategy
       const loadAudits = async (): Promise<Audit[]> => {
-        const fallbackStrategies = [
-          // ✅ FIXED: Use type assertion to bypass incorrect TypeScript interface
-          // The AuditQueryParams interface is outdated - API actually accepts different fields
-          () =>
-            auditsAPI.getAll({
-              limit: 100,
-              sortBy: "scheduled_date" as any, // ✅ Type assertion for API-validated field
-              sortOrder: "DESC",
-            }),
-          // Strategy 2: Try with alternative field
-          () =>
-            auditsAPI.getAll({
-              limit: 100,
-              sortBy: "created_at" as any, // ✅ Type assertion for API-validated field
-              sortOrder: "DESC",
-            }),
-          // Strategy 3: Try without sortBy to avoid validation
-          () =>
-            auditsAPI.getAll({
-              limit: 50,
-              sortOrder: "DESC",
-            }),
-          // Strategy 4: Minimal request
-          () => auditsAPI.getAll({ limit: 20 }),
-        ];
-
-        for (const [index, strategy] of fallbackStrategies.entries()) {
-          try {
-            console.log(`🔄 Trying audit loading strategy ${index + 1}...`);
-            const response = await strategy();
-
-            if (response.data.success && Array.isArray(response.data.data)) {
-              console.log(
-                `✅ Strategy ${index + 1} succeeded with ${response.data.data.length} audits`
-              );
-              return response.data.data;
-            } else {
-              console.warn(
-                `⚠️ Strategy ${index + 1} returned success:false or invalid data`
-              );
-              continue;
-            }
-          } catch (error: unknown) {
-            console.warn(`❌ Strategy ${index + 1} failed:`, error);
-            if (index === fallbackStrategies.length - 1) {
-              // Last strategy failed, throw error
-              throw error;
-            }
-            continue;
-          }
-        }
-
-        return []; // Return empty array as final fallback
-      };
-
-      // ✅ FIXED: Separate API calls for better debugging and error handling
-      const loadBuildings = async (): Promise<Building[]> => {
         try {
-          console.log("🏢 Loading buildings...");
-          const response = await buildingsAPI.getAll({ status: "active" });
+          console.log("📋 Loading audits...");
+
+          // Use your actual AuditQueryParams structure
+          const auditParams: AuditQueryParams = {
+            limit: 100,
+            sortOrder: "DESC",
+            status: "completed", // Focus on completed audits for compliance
+          };
+
+          const response = await auditsAPI.getAll(auditParams);
 
           if (response.data.success && Array.isArray(response.data.data)) {
-            console.log(
-              `✅ Loaded ${response.data.data.length} buildings:`,
-              response.data.data
-            );
+            console.log(`✅ Loaded ${response.data.data.length} audits`);
             return response.data.data;
           } else {
-            console.warn(
-              "⚠️ Buildings API returned success:false or invalid data:",
-              response.data
-            );
+            console.warn("⚠️ Audits API returned invalid data structure");
             return [];
           }
         } catch (error: unknown) {
-          console.error("❌ Buildings API failed:", error);
-          if (error && typeof error === "object" && "response" in error) {
-            const axiosError = error as AxiosError<ApiError>;
-            console.error("Buildings API error details:", {
-              status: axiosError.response?.status,
-              message: axiosError.response?.data?.message,
-              errors: axiosError.response?.data?.error,
-            });
-          }
+          console.error("❌ Failed to load audits:", error);
           return [];
         }
       };
 
+      // ✅ FIXED: Load buildings with proper query params
+      const loadBuildings = async (): Promise<Building[]> => {
+        try {
+          console.log("🏢 Loading buildings...");
+
+          const response = await buildingsAPI.getAll({
+            status: "active",
+            limit: 100,
+          });
+
+          if (response.data.success && Array.isArray(response.data.data)) {
+            console.log(`✅ Loaded ${response.data.data.length} buildings`);
+            return response.data.data;
+          } else {
+            console.warn("⚠️ Buildings API returned invalid data structure");
+            return [];
+          }
+        } catch (error: unknown) {
+          console.error("❌ Failed to load buildings:", error);
+          return [];
+        }
+      };
+
+      // ✅ FIXED: Load summaries with proper error handling
       const loadAuditSummary = async (): Promise<AuditSummary | null> => {
         try {
           console.log("📊 Loading audit summary...");
           const response = await auditsAPI.getSummary();
 
           if (response.data.success) {
-            console.log("✅ Loaded audit summary:", response.data.data);
+            console.log("✅ Loaded audit summary");
             return response.data.data;
           } else {
-            console.warn(
-              "⚠️ Audit summary returned success:false:",
-              response.data.message
-            );
+            console.warn("⚠️ Audit summary API returned success:false");
             return null;
           }
         } catch (error: unknown) {
-          console.error("❌ Audit summary failed:", error);
+          console.error("❌ Failed to load audit summary:", error);
           return null;
         }
       };
@@ -420,106 +411,69 @@ export default function ComprehensiveCompliancePage() {
       const loadDashboardSummary =
         async (): Promise<ComplianceSummary | null> => {
           try {
-            console.log("📈 Loading dashboard summary...");
+            console.log("📈 Loading compliance summary...");
             const response = await dashboardAPI.getComplianceSummary();
 
             if (response.data.success) {
-              console.log("✅ Loaded dashboard summary:", response.data.data);
+              console.log("✅ Loaded compliance summary");
               return response.data.data;
             } else {
-              console.warn(
-                "⚠️ Dashboard summary returned success:false:",
-                response.data.message
-              );
+              console.warn("⚠️ Compliance summary API returned success:false");
               return null;
             }
           } catch (error: unknown) {
-            console.error("❌ Dashboard summary failed:", error);
+            console.error("❌ Failed to load compliance summary:", error);
             return null;
           }
         };
 
-      const [auditsRes, buildingsRes, summaryRes, dashboardRes] =
-        await Promise.allSettled([
-          loadAudits(),
-          loadBuildings(),
-          loadAuditSummary(),
-          loadDashboardSummary(),
-        ]);
+      // Execute all API calls concurrently
+      const [
+        auditsData,
+        buildingsData,
+        auditSummaryData,
+        complianceSummaryData,
+      ] = await Promise.allSettled([
+        loadAudits(),
+        loadBuildings(),
+        loadAuditSummary(),
+        loadDashboardSummary(),
+      ]);
 
-      console.log("📊 All API calls completed, processing results...");
-
-      // ✅ FIXED: Simplified Promise.allSettled result handling
-      // Handle audits result
-      if (auditsRes.status === "fulfilled") {
-        const auditData = Array.isArray(auditsRes.value) ? auditsRes.value : [];
-        setAudits(auditData);
-        console.log(`✅ Set audits state: ${auditData.length} audits`);
-
-        // Auto-select most recent audit if available
-        if (auditData.length > 0) {
-          setSelectedAudit(auditData[0].id.toString());
-          console.log(
-            "🎯 Auto-selected audit:",
-            auditData[0].id,
-            auditData[0].title
-          );
+      // ✅ FIXED: Process results with proper error handling
+      if (auditsData.status === "fulfilled") {
+        setAudits(auditsData.value);
+        if (auditsData.value.length > 0) {
+          setSelectedAudit(auditsData.value[0].id.toString());
         }
       } else {
-        console.error("❌ Failed to load audits:", auditsRes.reason);
-        setAudits([]); // ✅ CRITICAL: Always ensure array state
+        console.error("❌ Audits loading failed:", auditsData.reason);
+        setAudits([]);
       }
 
-      // Handle buildings result
-      if (buildingsRes.status === "fulfilled") {
-        const buildingData = Array.isArray(buildingsRes.value)
-          ? buildingsRes.value
-          : [];
-        setBuildings(buildingData);
-        console.log(`✅ Set buildings state: ${buildingData.length} buildings`);
-
-        // Debug: Log building names for verification
-        if (buildingData.length > 0) {
-          console.log(
-            "🏢 Building names:",
-            buildingData.map((b) => b.name)
-          );
-          setSelectedBuilding(buildingData[0].id.toString());
-          console.log(
-            "🏢 Auto-selected building:",
-            buildingData[0].id,
-            buildingData[0].name
-          );
-        } else {
-          console.warn("⚠️ No buildings data available for dropdowns");
+      if (buildingsData.status === "fulfilled") {
+        setBuildings(buildingsData.value);
+        if (buildingsData.value.length > 0) {
+          setSelectedBuilding(buildingsData.value[0].id.toString());
         }
       } else {
-        console.error("❌ Failed to load buildings:", buildingsRes.reason);
-        setBuildings([]); // ✅ CRITICAL: Always ensure array state
+        console.error("❌ Buildings loading failed:", buildingsData.reason);
+        setBuildings([]);
       }
 
-      // Handle audit summary
-      if (summaryRes.status === "fulfilled" && summaryRes.value) {
-        setAuditSummary(summaryRes.value);
-        console.log("✅ Set audit summary");
-      } else {
-        console.warn("⚠️ No audit summary data");
-        setAuditSummary(null);
+      if (auditSummaryData.status === "fulfilled" && auditSummaryData.value) {
+        setAuditSummary(auditSummaryData.value);
       }
 
-      // Handle dashboard summary
-      if (dashboardRes.status === "fulfilled" && dashboardRes.value) {
-        setDashboardSummary(dashboardRes.value);
-        console.log("✅ Set dashboard summary");
-      } else {
-        console.warn("⚠️ No dashboard summary data");
-        setDashboardSummary(null);
+      if (
+        complianceSummaryData.status === "fulfilled" &&
+        complianceSummaryData.value
+      ) {
+        setDashboardSummary(complianceSummaryData.value);
       }
     } catch (error: unknown) {
       const errorMessage = handleApiError(error, "Loading initial data");
       setError(errorMessage);
-
-      // Ensure arrays are always initialized even on error
       setAudits([]);
       setBuildings([]);
     } finally {
@@ -528,101 +482,168 @@ export default function ComprehensiveCompliancePage() {
     }
   };
 
-  // Load initial data
-  useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  // Load compliance data when audit changes
-  useEffect(() => {
-    if (selectedAudit) {
-      loadComplianceData();
-    }
-  }, [selectedAudit]);
-
-  // Load trends when building changes
-  useEffect(() => {
-    if (selectedBuilding) {
-      loadComplianceTrends();
-    }
-  }, [selectedBuilding]);
-
+  // ✅ FIXED: Load compliance data using your actual API
   const loadComplianceData = useCallback(async () => {
     if (!selectedAudit) return;
 
     try {
+      console.log(`🔍 Loading compliance data for audit ${selectedAudit}`);
+
       const response = await complianceAPI.getAuditChecks(
         Number(selectedAudit)
       );
+
       if (response.data.success) {
         setComplianceData(response.data.data);
+        console.log("✅ Compliance data loaded successfully");
       } else {
-        console.warn("Failed to load compliance data:", response.data.message);
+        console.warn(
+          "⚠️ Failed to load compliance data:",
+          response.data.message
+        );
+        setComplianceData(null);
       }
     } catch (error: unknown) {
       const errorMessage = handleApiError(error, "Loading compliance data");
       console.error(errorMessage);
+      setComplianceData(null);
     }
   }, [selectedAudit]);
 
+  // ✅ FIXED: Load compliance trends using your actual API
   const loadComplianceTrends = useCallback(async () => {
     if (!selectedBuilding) return;
 
     try {
+      console.log(
+        `📈 Loading compliance trends for building ${selectedBuilding}`
+      );
+
       const response = await complianceAPI.getTrends(
         Number(selectedBuilding),
-        "PEC2017"
+        standardFilter || undefined
       );
+
       if (response.data.success) {
         setComplianceTrends(response.data.data);
+        console.log("✅ Compliance trends loaded successfully");
       } else {
         console.warn(
-          "Failed to load compliance trends:",
+          "⚠️ Failed to load compliance trends:",
           response.data.message
         );
+        setComplianceTrends(null);
       }
     } catch (error: unknown) {
       const errorMessage = handleApiError(error, "Loading compliance trends");
       console.error(errorMessage);
+      setComplianceTrends(null);
     }
-  }, [selectedBuilding]);
+  }, [selectedBuilding, standardFilter]);
 
+  // ✅ FIXED: Run compliance check with proper API structure
   const runComplianceCheck = async () => {
     try {
       setChecking(true);
 
-      const data = {
-        audit_id: Number(checkParams.audit_id),
-        building_id: Number(checkParams.building_id),
-        standards: checkParams.standards,
-        check_type: checkParams.check_type,
-        data_collection: {
-          power_quality_data: {
-            voltage_thd_l1:
-              Number(checkParams.power_quality_data.voltage_thd_l1) ||
-              undefined,
-            power_factor:
-              Number(checkParams.power_quality_data.power_factor) || undefined,
+      // ✅ FIXED: Construct request data according to your API
+      const requestData = {
+        auditId: Number(checkParams.auditId),
+        standardType: checkParams.standardType,
+        checkData: {
+          // Convert string values to numbers where needed
+          power_quality_readings: {
+            voltage_thd_l1: checkParams.checkData.power_quality_readings
+              .voltage_thd_l1
+              ? Number(
+                  checkParams.checkData.power_quality_readings.voltage_thd_l1
+                )
+              : undefined,
+            voltage_thd_l2: checkParams.checkData.power_quality_readings
+              .voltage_thd_l2
+              ? Number(
+                  checkParams.checkData.power_quality_readings.voltage_thd_l2
+                )
+              : undefined,
+            voltage_thd_l3: checkParams.checkData.power_quality_readings
+              .voltage_thd_l3
+              ? Number(
+                  checkParams.checkData.power_quality_readings.voltage_thd_l3
+                )
+              : undefined,
+            thd_current: checkParams.checkData.power_quality_readings
+              .thd_current
+              ? Number(checkParams.checkData.power_quality_readings.thd_current)
+              : undefined,
+            power_factor: checkParams.checkData.power_quality_readings
+              .power_factor
+              ? Number(
+                  checkParams.checkData.power_quality_readings.power_factor
+                )
+              : undefined,
+            voltage_unbalance: checkParams.checkData.power_quality_readings
+              .voltage_unbalance
+              ? Number(
+                  checkParams.checkData.power_quality_readings.voltage_unbalance
+                )
+              : undefined,
+            frequency: checkParams.checkData.power_quality_readings.frequency
+              ? Number(checkParams.checkData.power_quality_readings.frequency)
+              : undefined,
           },
           safety_inspection: {
-            electrical_panel_clearance_m:
-              Number(
-                checkParams.safety_inspection.electrical_panel_clearance_m
-              ) || undefined,
-            fire_extinguisher_count:
-              Number(checkParams.safety_inspection.fire_extinguisher_count) ||
-              undefined,
+            electrical_panel_clearance_m: checkParams.checkData
+              .safety_inspection.electrical_panel_clearance_m
+              ? Number(
+                  checkParams.checkData.safety_inspection
+                    .electrical_panel_clearance_m
+                )
+              : undefined,
+            fire_extinguisher_count: checkParams.checkData.safety_inspection
+              .fire_extinguisher_count
+              ? Number(
+                  checkParams.checkData.safety_inspection
+                    .fire_extinguisher_count
+                )
+              : undefined,
+            emergency_exit_clearance: checkParams.checkData.safety_inspection
+              .emergency_exit_clearance
+              ? Number(
+                  checkParams.checkData.safety_inspection
+                    .emergency_exit_clearance
+                )
+              : undefined,
+            ground_fault_protection:
+              checkParams.checkData.safety_inspection.ground_fault_protection,
+          },
+          energy_efficiency: {
+            power_factor_target: Number(
+              checkParams.checkData.energy_efficiency.power_factor_target
+            ),
+            energy_consumption_target: checkParams.checkData.energy_efficiency
+              .energy_consumption_target
+              ? Number(
+                  checkParams.checkData.energy_efficiency
+                    .energy_consumption_target
+                )
+              : undefined,
+            demand_factor: checkParams.checkData.energy_efficiency.demand_factor
+              ? Number(checkParams.checkData.energy_efficiency.demand_factor)
+              : undefined,
           },
         },
       };
 
-      const response = await complianceAPI.performCheck(data);
+      console.log("🔄 Running compliance check with data:", requestData);
+
+      const response = await complianceAPI.performCheck(requestData);
 
       if (response.data.success) {
+        console.log("✅ Compliance check completed successfully");
         await loadComplianceData();
         onRunCheckClose();
       } else {
-        console.error("Compliance check failed:", response.data.message);
+        console.error("❌ Compliance check failed:", response.data.message);
       }
     } catch (error: unknown) {
       const errorMessage = handleApiError(error, "Running compliance check");
@@ -632,31 +653,60 @@ export default function ComprehensiveCompliancePage() {
     }
   };
 
+  // ✅ FIXED: Create compliance check with proper validation
   const createComplianceCheck = async () => {
     try {
+      // Basic validation
+      if (
+        !newCheckData.audit_id ||
+        !newCheckData.standard ||
+        !newCheckData.requirement_code
+      ) {
+        console.error(
+          "❌ Missing required fields for compliance check creation"
+        );
+        return;
+      }
+
+      console.log("🔄 Creating new compliance check:", newCheckData);
+
+      // Note: This endpoint might need to be implemented on your backend
+      // For now, we'll use a generic approach
       const response = await fetch("/api/compliance/checks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCheckData),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        },
+        body: JSON.stringify({
+          ...newCheckData,
+          audit_id: Number(newCheckData.audit_id),
+        }),
       });
 
       if (response.ok) {
+        console.log("✅ Compliance check created successfully");
         await loadComplianceData();
         onCreateCheckClose();
+
+        // Reset form
         setNewCheckData({
           audit_id: "",
           standard: "",
           requirement_code: "",
           requirement_title: "",
-          status: "warning",
+          requirement_description: "",
+          status: "not_checked",
           severity: "medium",
           notes: "",
           corrective_action: "",
           target_completion_date: "",
           responsible_party: "",
+          evidence: "",
         });
       } else {
-        console.error("Failed to create compliance check");
+        const errorData = await response.json();
+        console.error("❌ Failed to create compliance check:", errorData);
       }
     } catch (error: unknown) {
       const errorMessage = handleApiError(error, "Creating compliance check");
@@ -664,34 +714,44 @@ export default function ComprehensiveCompliancePage() {
     }
   };
 
+  // ✅ FIXED: Update compliance check
   const updateComplianceCheck = async () => {
     if (!editingCheck) return;
 
     try {
+      console.log("🔄 Updating compliance check:", editingCheck.id);
+
       const response = await fetch(
         `/api/compliance/checks/${editingCheck.id}`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          },
           body: JSON.stringify({
             status: editingCheck.status,
             notes: editingCheck.notes,
             corrective_action: editingCheck.corrective_action,
+            target_completion_date: editingCheck.target_completion_date,
+            responsible_party: editingCheck.responsible_party,
+            verification_method: editingCheck.notes,
             actual_completion_date:
               editingCheck.status === "passed"
                 ? new Date().toISOString()
                 : null,
-            verification_method: editingCheck.notes,
           }),
         }
       );
 
       if (response.ok) {
+        console.log("✅ Compliance check updated successfully");
         await loadComplianceData();
         onEditCheckClose();
         setEditingCheck(null);
       } else {
-        console.error("Failed to update compliance check");
+        const errorData = await response.json();
+        console.error("❌ Failed to update compliance check:", errorData);
       }
     } catch (error: unknown) {
       const errorMessage = handleApiError(error, "Updating compliance check");
@@ -699,6 +759,7 @@ export default function ComprehensiveCompliancePage() {
     }
   };
 
+  // Modal handlers
   const openDetailModal = (check: ComplianceCheck) => {
     setSelectedCheck(check);
     onDetailOpen();
@@ -717,12 +778,16 @@ export default function ComprehensiveCompliancePage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "passed":
+      case "compliant":
         return "success";
       case "failed":
+      case "non_compliant":
         return "danger";
       case "warning":
+      case "partially_compliant":
         return "warning";
       case "not_applicable":
+      case "not_assessed":
         return "default";
       default:
         return "default";
@@ -763,7 +828,6 @@ export default function ComprehensiveCompliancePage() {
       case "medium":
         return "warning";
       case "high":
-        return "danger";
       case "critical":
         return "danger";
       default:
@@ -771,43 +835,16 @@ export default function ComprehensiveCompliancePage() {
     }
   };
 
-  // ✅ FIXED: Enhanced filter options generation with debugging
-  const auditFilterOptions = (() => {
-    if (!Array.isArray(audits)) {
-      console.warn("⚠️ audits is not an array:", typeof audits, audits);
-      return [];
-    }
+  // ✅ FIXED: Enhanced filter options with proper data checking
+  const auditFilterOptions = audits.map((audit) => ({
+    key: audit.id.toString(),
+    label: `${audit.title || "Untitled"} - ${audit.building_name || "Unknown Building"}`,
+  }));
 
-    const options = audits.map((audit) => ({
-      key: audit.id.toString(),
-      label: `${audit.title || "Untitled"} - ${audit.building_name || "Unknown Building"}`,
-    }));
-
-    console.log(`🎯 Generated ${options.length} audit filter options`);
-    return options;
-  })();
-
-  const buildingFilterOptions = (() => {
-    if (!Array.isArray(buildings)) {
-      console.warn(
-        "⚠️ buildings is not an array:",
-        typeof buildings,
-        buildings
-      );
-      return [];
-    }
-
-    const options = buildings.map((building) => ({
-      key: building.id.toString(),
-      label: building.name || "Unnamed Building",
-    }));
-
-    console.log(
-      `🏢 Generated ${options.length} building filter options:`,
-      options
-    );
-    return options;
-  })();
+  const buildingFilterOptions = buildings.map((building) => ({
+    key: building.id.toString(),
+    label: building.name || "Unnamed Building",
+  }));
 
   const standardFilterOptions = [
     { key: "", label: "All Standards" },
@@ -823,6 +860,7 @@ export default function ComprehensiveCompliancePage() {
     { key: "failed", label: "Failed" },
     { key: "warning", label: "Warning" },
     { key: "not_applicable", label: "Not Applicable" },
+    { key: "not_checked", label: "Not Checked" },
   ];
 
   const severityFilterOptions = [
@@ -833,107 +871,94 @@ export default function ComprehensiveCompliancePage() {
     { key: "low", label: "Low" },
   ];
 
-  const complianceScoreFilterOptions = [
-    { key: "", label: "All Scores" },
-    { key: "excellent", label: "Excellent (90-100%)" },
-    { key: "good", label: "Good (70-89%)" },
-    { key: "fair", label: "Fair (50-69%)" },
-    { key: "poor", label: "Poor (<50%)" },
-  ];
-
-  const checkTypeOptions = [
-    { key: "comprehensive", label: "Comprehensive" },
-    { key: "power_quality", label: "Power Quality Only" },
-    { key: "safety", label: "Safety Only" },
-    { key: "energy_efficiency", label: "Energy Efficiency Only" },
-  ];
-
-  // ✅ FIXED: Consistent selection handlers following development guide
+  // ✅ FIXED: Selection handlers
   const handleAuditChange = (keys: any) => {
-    setSelectedAudit((Array.from(keys)[0] as string) || "");
+    const selectedKey = Array.from(keys)[0] as string;
+    setSelectedAudit(selectedKey || "");
   };
 
   const handleBuildingChange = (keys: any) => {
-    setSelectedBuilding((Array.from(keys)[0] as string) || "");
+    const selectedKey = Array.from(keys)[0] as string;
+    setSelectedBuilding(selectedKey || "");
   };
 
   const handleStandardFilterChange = (keys: any) => {
-    setStandardFilter((Array.from(keys)[0] as string) || "");
+    const selectedKey = Array.from(keys)[0] as string;
+    setStandardFilter(selectedKey || "");
   };
 
   const handleStatusFilterChange = (keys: any) => {
-    setStatusFilter((Array.from(keys)[0] as string) || "");
+    const selectedKey = Array.from(keys)[0] as string;
+    setStatusFilter(selectedKey || "");
   };
 
   const handleSeverityFilterChange = (keys: any) => {
-    setSeverityFilter((Array.from(keys)[0] as string) || "");
+    const selectedKey = Array.from(keys)[0] as string;
+    setSeverityFilter(selectedKey || "");
   };
 
-  const handleComplianceScoreFilterChange = (keys: any) => {
-    setComplianceScoreFilter((Array.from(keys)[0] as string) || "");
-  };
-
-  const handleCheckParamAuditChange = (keys: any) => {
-    setCheckParams((prev) => ({
-      ...prev,
-      audit_id: (Array.from(keys)[0] as string) || "",
-    }));
-  };
-
-  const handleCheckParamBuildingChange = (keys: any) => {
-    setCheckParams((prev) => ({
-      ...prev,
-      building_id: (Array.from(keys)[0] as string) || "",
-    }));
-  };
-
-  const handleCheckTypeChange = (keys: any) => {
-    setCheckParams((prev) => ({
-      ...prev,
-      check_type: (Array.from(keys)[0] as string) || "comprehensive",
-    }));
-  };
-
-  // ✅ FIXED: Safe filter checks with comprehensive validation
+  // ✅ FIXED: Filtered checks with comprehensive validation
   const filteredChecks = (() => {
-    // Defensive programming: ensure we have valid data structures
-    if (!complianceData || !complianceData.detailed_checks) {
+    if (
+      !complianceData?.detailed_checks ||
+      !Array.isArray(complianceData.detailed_checks)
+    ) {
       return [];
     }
 
-    const checks = Array.isArray(complianceData.detailed_checks)
-      ? complianceData.detailed_checks
-      : [];
-
-    return checks.filter((check) => {
-      // Ensure check object has required properties
+    return complianceData.detailed_checks.filter((check) => {
       if (!check || typeof check !== "object") return false;
 
       if (standardFilter && check.standard !== standardFilter) return false;
       if (statusFilter && check.status !== statusFilter) return false;
       if (severityFilter && check.severity !== severityFilter) return false;
-      if (
-        searchQuery &&
-        !(check.requirement_title || "")
+
+      if (searchQuery) {
+        const searchLower = searchQuery.toLowerCase();
+        const titleMatch = (check.requirement_title || "")
           .toLowerCase()
-          .includes(searchQuery.toLowerCase()) &&
-        !(check.requirement_code || "")
+          .includes(searchLower);
+        const codeMatch = (check.requirement_code || "")
           .toLowerCase()
-          .includes(searchQuery.toLowerCase())
-      )
-        return false;
+          .includes(searchLower);
+        const descMatch = (check.requirement_description || "")
+          .toLowerCase()
+          .includes(searchLower);
+
+        if (!titleMatch && !codeMatch && !descMatch) return false;
+      }
+
       return true;
     });
   })();
 
-  // Paginated checks
+  // Pagination
   const totalPages = Math.ceil(filteredChecks.length / itemsPerPage);
   const paginatedChecks = filteredChecks.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  // ✅ FIXED: Proper loading state with skeleton
+  // Load initial data
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  // Load compliance data when audit changes
+  useEffect(() => {
+    if (selectedAudit) {
+      loadComplianceData();
+    }
+  }, [selectedAudit, loadComplianceData]);
+
+  // Load trends when building changes
+  useEffect(() => {
+    if (selectedBuilding) {
+      loadComplianceTrends();
+    }
+  }, [selectedBuilding, loadComplianceTrends]);
+
+  // ✅ FIXED: Loading state with skeleton
   if (loading) {
     return (
       <div className="space-y-6">
@@ -961,7 +986,7 @@ export default function ComprehensiveCompliancePage() {
     );
   }
 
-  // ✅ FIXED: Proper error state
+  // ✅ FIXED: Error state
   if (error) {
     return (
       <div className="space-y-6">
@@ -990,76 +1015,6 @@ export default function ComprehensiveCompliancePage() {
 
   return (
     <div className="space-y-6">
-      {/* Debug Panel - Only show in development */}
-      {process.env.NODE_ENV === "development" && (
-        <Card className="bg-gray-50 border-dashed">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <h4 className="text-sm font-medium text-gray-600">
-              🐛 Debug Info (Development Only)
-            </h4>
-            <Button
-              size="sm"
-              variant="flat"
-              onPress={() => {
-                console.log("🔄 Manual data reload triggered");
-                loadInitialData();
-              }}
-            >
-              Reload Data
-            </Button>
-          </CardHeader>
-          <CardBody className="text-xs space-y-2">
-            <div>
-              <strong>Loading:</strong> {loading.toString()}
-            </div>
-            <div>
-              <strong>Error:</strong> {error || "None"}
-            </div>
-            <div>
-              <strong>Audits loaded:</strong> {audits.length} items
-            </div>
-            <div>
-              <strong>Buildings loaded:</strong> {buildings.length} items
-            </div>
-            <div>
-              <strong>Selected audit:</strong> {selectedAudit || "None"}
-            </div>
-            <div>
-              <strong>Selected building:</strong> {selectedBuilding || "None"}
-            </div>
-            <div>
-              <strong>Audit options:</strong> {auditFilterOptions.length}{" "}
-              generated
-            </div>
-            <div>
-              <strong>Building options:</strong> {buildingFilterOptions.length}{" "}
-              generated
-            </div>
-            {buildings.length > 0 && (
-              <div>
-                <strong>Building names:</strong>{" "}
-                {buildings.map((b) => b.name).join(", ")}
-              </div>
-            )}
-            {audits.length > 0 && (
-              <div>
-                <strong>Audit titles:</strong>{" "}
-                {audits
-                  .slice(0, 3)
-                  .map((a) => a.title)
-                  .join(", ")}
-                ...
-              </div>
-            )}
-            <div className="pt-2 border-t border-gray-200">
-              <div>
-                <strong>Check console for detailed API logs</strong>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-      )}
-
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -1193,7 +1148,7 @@ export default function ComprehensiveCompliancePage() {
                 </h3>
               </CardHeader>
               <CardBody>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {dashboardSummary.by_standard.map((standard, index) => {
                     const standardInfo = complianceStandards.find(
                       (s) => s.key === standard.standard
@@ -1270,85 +1225,59 @@ export default function ComprehensiveCompliancePage() {
             </Card>
           )}
 
-          {/* Risk Assessment */}
-          {dashboardSummary && (
+          {/* Recent Issues */}
+          {dashboardSummary?.recent_issues && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <h3 className="text-lg font-semibold">Risk Assessment</h3>
+                  <h3 className="text-lg font-semibold">
+                    Recent Critical Issues
+                  </h3>
                 </CardHeader>
                 <CardBody>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-default-600">
-                        Overall Risk Level
-                      </span>
-                      <Chip
-                        color={
-                          getRiskColor(
-                            dashboardSummary.overall_status?.risk_level ||
-                              "medium"
-                          ) as any
-                        }
-                        size="lg"
-                        variant="flat"
-                      >
-                        {(
-                          dashboardSummary.overall_status?.risk_level ||
-                          "UNKNOWN"
-                        ).toUpperCase()}
-                      </Chip>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-default-600 mb-2">
-                        Recent Critical Issues
-                      </div>
-                      <div className="space-y-2">
-                        {(dashboardSummary.recent_issues || [])
-                          .slice(0, 3)
-                          .map((issue, index) => (
-                            <div
-                              key={index}
-                              className="p-2 border rounded text-sm"
+                  <div className="space-y-3">
+                    {dashboardSummary.recent_issues
+                      .slice(0, 5)
+                      .map((issue, index) => (
+                        <div
+                          key={index}
+                          className="border-l-2 border-l-danger pl-3"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <Chip
+                              color={getSeverityColor(issue.severity) as any}
+                              size="sm"
+                              variant="flat"
                             >
-                              <div className="font-medium">
-                                {issue.description || "No description"}
-                              </div>
-                              <div className="text-xs text-default-500">
-                                {issue.building_name || "Unknown building"}
-                              </div>
-                            </div>
-                          ))}
-                        {(!dashboardSummary.recent_issues ||
-                          dashboardSummary.recent_issues.length === 0) && (
-                          <div className="text-sm text-default-500 italic">
-                            No recent issues found
+                              {issue.severity || "medium"}
+                            </Chip>
+                            <span className="text-xs text-default-500">
+                              {issue.due_date
+                                ? new Date(issue.due_date).toLocaleDateString()
+                                : "No due date"}
+                            </span>
                           </div>
-                        )}
+                          <div className="font-medium text-sm">
+                            {issue.description || "No description"}
+                          </div>
+                          <div className="text-xs text-default-500">
+                            {issue.building_name || "Unknown building"}
+                          </div>
+                        </div>
+                      ))}
+                    {(!dashboardSummary.recent_issues ||
+                      dashboardSummary.recent_issues.length === 0) && (
+                      <div className="text-sm text-default-500 italic">
+                        No recent issues found
                       </div>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-default-600">Compliance Rate</span>
-                      <span className="font-medium">
-                        {safeToFixed(
-                          dashboardSummary.overall_status
-                            ?.compliance_percentage,
-                          1
-                        )}
-                        %
-                      </span>
-                    </div>
+                    )}
                   </div>
                 </CardBody>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <h3 className="text-lg font-semibold">
-                    Priority Improvement Areas
-                  </h3>
+                  <h3 className="text-lg font-semibold">Improvement Areas</h3>
                 </CardHeader>
                 <CardBody>
                   <div className="space-y-3">
@@ -1414,7 +1343,7 @@ export default function ComprehensiveCompliancePage() {
           {/* Audit Selection and Summary */}
           <Card className="mb-6">
             <CardBody>
-              {/* Show informational message if no data */}
+              {/* Data availability warning */}
               {!loading && (audits.length === 0 || buildings.length === 0) && (
                 <div className="mb-4 p-3 bg-warning-50 border border-warning-200 rounded-lg">
                   <div className="flex items-center gap-2 text-warning-800 text-sm">
@@ -1454,14 +1383,12 @@ export default function ComprehensiveCompliancePage() {
                 </Select>
 
                 <Select
-                  label="Compliance Score Filter"
-                  placeholder="Filter by score range"
-                  selectedKeys={
-                    complianceScoreFilter ? [complianceScoreFilter] : []
-                  }
-                  onSelectionChange={handleComplianceScoreFilterChange}
+                  label="Filter by Standard"
+                  placeholder="All standards"
+                  selectedKeys={standardFilter ? [standardFilter] : []}
+                  onSelectionChange={handleStandardFilterChange}
                 >
-                  {complianceScoreFilterOptions.map((option) => (
+                  {standardFilterOptions.map((option) => (
                     <SelectItem key={option.key}>{option.label}</SelectItem>
                   ))}
                 </Select>
@@ -1590,24 +1517,12 @@ export default function ComprehensiveCompliancePage() {
                       <div className="text-sm text-default-500">Failed</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-2xl font-bold">
-                        {(() => {
-                          const totalChecks = safeNumber(
-                            complianceData.overall_compliance?.total_checks,
-                            1
-                          );
-                          const passedChecks = safeNumber(
-                            complianceData.overall_compliance?.passed_checks
-                          );
-                          const passRate =
-                            totalChecks > 0
-                              ? (passedChecks / totalChecks) * 100
-                              : 0;
-                          return safeToFixed(passRate, 1);
-                        })()}
-                        %
+                      <div className="text-2xl font-bold text-warning">
+                        {safeInteger(
+                          complianceData.overall_compliance?.warnings
+                        )}
                       </div>
-                      <div className="text-sm text-default-500">Pass Rate</div>
+                      <div className="text-sm text-default-500">Warnings</div>
                     </div>
                   </div>
 
@@ -1630,12 +1545,52 @@ export default function ComprehensiveCompliancePage() {
                       <span>Fully Compliant</span>
                     </div>
                   </div>
+
+                  {/* Risk Assessment */}
+                  {complianceData.risk_assessment && (
+                    <div className="mt-4 p-3 border rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium">Risk Level</span>
+                        <Chip
+                          color={
+                            getRiskColor(
+                              complianceData.risk_assessment.level
+                            ) as any
+                          }
+                          size="sm"
+                          variant="flat"
+                        >
+                          {complianceData.risk_assessment.level.toUpperCase()}
+                        </Chip>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div className="text-center">
+                          <div className="font-bold text-danger">
+                            {complianceData.risk_assessment.critical_issues}
+                          </div>
+                          <div className="text-default-500">Critical</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-bold text-warning">
+                            {complianceData.risk_assessment.major_issues}
+                          </div>
+                          <div className="text-default-500">Major</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-bold text-primary">
+                            {complianceData.risk_assessment.minor_issues}
+                          </div>
+                          <div className="text-default-500">Minor</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardBody>
               </Card>
 
               {/* Standards Summary */}
               {complianceData?.standards_summary && (
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                   {complianceData.standards_summary.map((standard, index) => {
                     const standardInfo = complianceStandards.find(
                       (s) => s.key === standard.standard
@@ -1682,11 +1637,7 @@ export default function ComprehensiveCompliancePage() {
 
                             <div className="flex items-center justify-between">
                               <Chip
-                                color={
-                                  standard.status === "compliant"
-                                    ? "success"
-                                    : "danger"
-                                }
+                                color={getStatusColor(standard.status) as any}
                                 size="sm"
                                 variant="flat"
                               >
@@ -1698,6 +1649,11 @@ export default function ComprehensiveCompliancePage() {
                                 </div>
                               )}
                             </div>
+
+                            <div className="text-xs text-default-500">
+                              {standard.requirements_met}/
+                              {standard.total_requirements} requirements met
+                            </div>
                           </div>
                         </CardBody>
                       </Card>
@@ -1705,6 +1661,30 @@ export default function ComprehensiveCompliancePage() {
                   })}
                 </div>
               )}
+
+              {/* Recommendations */}
+              {complianceData?.recommendations &&
+                complianceData.recommendations.length > 0 && (
+                  <Card className="mb-6">
+                    <CardHeader>
+                      <h3 className="text-lg font-semibold">Recommendations</h3>
+                    </CardHeader>
+                    <CardBody>
+                      <div className="space-y-2">
+                        {complianceData.recommendations.map(
+                          (recommendation, index) => (
+                            <div key={index} className="flex items-start gap-2">
+                              <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
+                              <p className="text-sm text-default-600">
+                                {recommendation}
+                              </p>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </CardBody>
+                  </Card>
+                )}
             </>
           )}
         </Tab>
@@ -1826,6 +1806,12 @@ export default function ComprehensiveCompliancePage() {
                           <div className="text-sm text-default-500">
                             {check.requirement_code}
                           </div>
+                          {check.requirement_description && (
+                            <div className="text-xs text-default-400 mt-1">
+                              {check.requirement_description.substring(0, 80)}
+                              ...
+                            </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -1874,6 +1860,10 @@ export default function ComprehensiveCompliancePage() {
                                 check.target_completion_date
                               ).toLocaleDateString()}
                             </div>
+                            {new Date(check.target_completion_date) <
+                              new Date() && (
+                              <div className="text-xs text-danger">Overdue</div>
+                            )}
                           </div>
                         ) : (
                           <span className="text-default-400">Not set</span>
@@ -2103,7 +2093,7 @@ export default function ComprehensiveCompliancePage() {
       {/* Modals */}
 
       {/* Run Compliance Check Modal */}
-      <Modal isOpen={isRunCheckOpen} onOpenChange={onRunCheckClose} size="3xl">
+      <Modal isOpen={isRunCheckOpen} onOpenChange={onRunCheckClose} size="4xl">
         <ModalContent>
           {(onClose) => (
             <>
@@ -2118,9 +2108,14 @@ export default function ComprehensiveCompliancePage() {
                         : "No audits available"
                     }
                     selectedKeys={
-                      checkParams.audit_id ? [checkParams.audit_id] : []
+                      checkParams.auditId ? [checkParams.auditId] : []
                     }
-                    onSelectionChange={handleCheckParamAuditChange}
+                    onSelectionChange={(keys) =>
+                      setCheckParams((prev) => ({
+                        ...prev,
+                        auditId: Array.from(keys)[0] as string,
+                      }))
+                    }
                     isDisabled={auditFilterOptions.length === 0}
                   >
                     {auditFilterOptions.length > 0 ? (
@@ -2135,86 +2130,110 @@ export default function ComprehensiveCompliancePage() {
                   </Select>
 
                   <Select
-                    label="Building"
-                    placeholder={
-                      buildingFilterOptions.length > 0
-                        ? "Select building"
-                        : "No buildings available"
+                    label="Standard Type"
+                    selectedKeys={[checkParams.standardType]}
+                    onSelectionChange={(keys) =>
+                      setCheckParams((prev) => ({
+                        ...prev,
+                        standardType: Array.from(keys)[0] as any,
+                      }))
                     }
-                    selectedKeys={
-                      checkParams.building_id ? [checkParams.building_id] : []
-                    }
-                    onSelectionChange={handleCheckParamBuildingChange}
-                    isDisabled={buildingFilterOptions.length === 0}
                   >
-                    {buildingFilterOptions.length > 0 ? (
-                      buildingFilterOptions.map((option) => (
-                        <SelectItem key={option.key}>{option.label}</SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem key="no-buildings" isDisabled>
-                        No buildings available
+                    {complianceStandards.map((standard) => (
+                      <SelectItem key={standard.key}>
+                        {standard.name}
                       </SelectItem>
-                    )}
+                    ))}
                   </Select>
                 </div>
 
-                <Select
-                  label="Check Type"
-                  selectedKeys={[checkParams.check_type]}
-                  onSelectionChange={handleCheckTypeChange}
-                >
-                  {checkTypeOptions.map((option) => (
-                    <SelectItem key={option.key}>{option.label}</SelectItem>
-                  ))}
-                </Select>
-
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-2 block">
-                    Standards to Check
-                  </label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {complianceStandards.map((standard) => (
-                      <Chip
-                        key={standard.key}
-                        variant={
-                          checkParams.standards.includes(standard.key)
-                            ? "solid"
-                            : "bordered"
-                        }
-                        color="primary"
-                        className="cursor-pointer justify-start"
-                        onClick={() => {
-                          setCheckParams((prev) => ({
-                            ...prev,
-                            standards: prev.standards.includes(standard.key)
-                              ? prev.standards.filter((s) => s !== standard.key)
-                              : [...prev.standards, standard.key],
-                          }));
-                        }}
-                      >
-                        {standard.name}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <h4 className="font-medium text-foreground">
-                    Power Quality Data (Optional)
+                    Power Quality Readings
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Input
                       label="Voltage THD L1 (%)"
                       type="number"
                       step="0.1"
-                      value={checkParams.power_quality_data.voltage_thd_l1}
+                      value={
+                        checkParams.checkData.power_quality_readings
+                          .voltage_thd_l1
+                      }
                       onChange={(e) =>
                         setCheckParams((prev) => ({
                           ...prev,
-                          power_quality_data: {
-                            ...prev.power_quality_data,
-                            voltage_thd_l1: e.target.value,
+                          checkData: {
+                            ...prev.checkData,
+                            power_quality_readings: {
+                              ...prev.checkData.power_quality_readings,
+                              voltage_thd_l1: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Voltage THD L2 (%)"
+                      type="number"
+                      step="0.1"
+                      value={
+                        checkParams.checkData.power_quality_readings
+                          .voltage_thd_l2
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            power_quality_readings: {
+                              ...prev.checkData.power_quality_readings,
+                              voltage_thd_l2: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Voltage THD L3 (%)"
+                      type="number"
+                      step="0.1"
+                      value={
+                        checkParams.checkData.power_quality_readings
+                          .voltage_thd_l3
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            power_quality_readings: {
+                              ...prev.checkData.power_quality_readings,
+                              voltage_thd_l3: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Current THD (%)"
+                      type="number"
+                      step="0.1"
+                      value={
+                        checkParams.checkData.power_quality_readings.thd_current
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            power_quality_readings: {
+                              ...prev.checkData.power_quality_readings,
+                              thd_current: e.target.value,
+                            },
                           },
                         }))
                       }
@@ -2226,13 +2245,40 @@ export default function ComprehensiveCompliancePage() {
                       step="0.001"
                       min="0"
                       max="1"
-                      value={checkParams.power_quality_data.power_factor}
+                      value={
+                        checkParams.checkData.power_quality_readings
+                          .power_factor
+                      }
                       onChange={(e) =>
                         setCheckParams((prev) => ({
                           ...prev,
-                          power_quality_data: {
-                            ...prev.power_quality_data,
-                            power_factor: e.target.value,
+                          checkData: {
+                            ...prev.checkData,
+                            power_quality_readings: {
+                              ...prev.checkData.power_quality_readings,
+                              power_factor: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Frequency (Hz)"
+                      type="number"
+                      step="0.1"
+                      value={
+                        checkParams.checkData.power_quality_readings.frequency
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            power_quality_readings: {
+                              ...prev.checkData.power_quality_readings,
+                              frequency: e.target.value,
+                            },
                           },
                         }))
                       }
@@ -2240,9 +2286,9 @@ export default function ComprehensiveCompliancePage() {
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <h4 className="font-medium text-foreground">
-                    Safety Inspection Data (Optional)
+                    Safety Inspection
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Input
@@ -2250,15 +2296,18 @@ export default function ComprehensiveCompliancePage() {
                       type="number"
                       step="0.1"
                       value={
-                        checkParams.safety_inspection
+                        checkParams.checkData.safety_inspection
                           .electrical_panel_clearance_m
                       }
                       onChange={(e) =>
                         setCheckParams((prev) => ({
                           ...prev,
-                          safety_inspection: {
-                            ...prev.safety_inspection,
-                            electrical_panel_clearance_m: e.target.value,
+                          checkData: {
+                            ...prev.checkData,
+                            safety_inspection: {
+                              ...prev.checkData.safety_inspection,
+                              electrical_panel_clearance_m: e.target.value,
+                            },
                           },
                         }))
                       }
@@ -2268,14 +2317,143 @@ export default function ComprehensiveCompliancePage() {
                       label="Fire Extinguisher Count"
                       type="number"
                       value={
-                        checkParams.safety_inspection.fire_extinguisher_count
+                        checkParams.checkData.safety_inspection
+                          .fire_extinguisher_count
                       }
                       onChange={(e) =>
                         setCheckParams((prev) => ({
                           ...prev,
-                          safety_inspection: {
-                            ...prev.safety_inspection,
-                            fire_extinguisher_count: e.target.value,
+                          checkData: {
+                            ...prev.checkData,
+                            safety_inspection: {
+                              ...prev.checkData.safety_inspection,
+                              fire_extinguisher_count: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Emergency Exit Clearance (m)"
+                      type="number"
+                      step="0.1"
+                      value={
+                        checkParams.checkData.safety_inspection
+                          .emergency_exit_clearance
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            safety_inspection: {
+                              ...prev.checkData.safety_inspection,
+                              emergency_exit_clearance: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="ground_fault_protection"
+                        checked={
+                          checkParams.checkData.safety_inspection
+                            .ground_fault_protection
+                        }
+                        onChange={(e) =>
+                          setCheckParams((prev) => ({
+                            ...prev,
+                            checkData: {
+                              ...prev.checkData,
+                              safety_inspection: {
+                                ...prev.checkData.safety_inspection,
+                                ground_fault_protection: e.target.checked,
+                              },
+                            },
+                          }))
+                        }
+                        className="rounded"
+                      />
+                      <label
+                        htmlFor="ground_fault_protection"
+                        className="text-sm"
+                      >
+                        Ground Fault Protection Available
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="font-medium text-foreground">
+                    Energy Efficiency
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Input
+                      label="Power Factor Target"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1"
+                      value={
+                        checkParams.checkData.energy_efficiency
+                          .power_factor_target
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            energy_efficiency: {
+                              ...prev.checkData.energy_efficiency,
+                              power_factor_target: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Energy Consumption Target (kWh)"
+                      type="number"
+                      value={
+                        checkParams.checkData.energy_efficiency
+                          .energy_consumption_target
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            energy_efficiency: {
+                              ...prev.checkData.energy_efficiency,
+                              energy_consumption_target: e.target.value,
+                            },
+                          },
+                        }))
+                      }
+                    />
+
+                    <Input
+                      label="Demand Factor"
+                      type="number"
+                      step="0.01"
+                      value={
+                        checkParams.checkData.energy_efficiency.demand_factor
+                      }
+                      onChange={(e) =>
+                        setCheckParams((prev) => ({
+                          ...prev,
+                          checkData: {
+                            ...prev.checkData,
+                            energy_efficiency: {
+                              ...prev.checkData.energy_efficiency,
+                              demand_factor: e.target.value,
+                            },
                           },
                         }))
                       }
@@ -2334,9 +2512,15 @@ export default function ComprehensiveCompliancePage() {
                           {selectedCheck.requirement_code}
                         </div>
                         <div>
-                          <strong>Description:</strong>{" "}
+                          <strong>Title:</strong>{" "}
                           {selectedCheck.requirement_title}
                         </div>
+                        {selectedCheck.requirement_description && (
+                          <div>
+                            <strong>Description:</strong>{" "}
+                            {selectedCheck.requirement_description}
+                          </div>
+                        )}
                         <div>
                           <strong>Severity:</strong>
                           <Chip
@@ -2352,7 +2536,7 @@ export default function ComprehensiveCompliancePage() {
                           </Chip>
                         </div>
                         <div>
-                          <strong>Last Checked:</strong>{" "}
+                          <strong>Last Assessed:</strong>{" "}
                           {new Date(
                             selectedCheck.assessment_date
                           ).toLocaleString()}
@@ -2369,9 +2553,11 @@ export default function ComprehensiveCompliancePage() {
                           <div>
                             <strong>Status:</strong> {selectedCheck.status}
                           </div>
-                          <div>
-                            <strong>Notes:</strong> {selectedCheck.notes}
-                          </div>
+                          {selectedCheck.notes && (
+                            <div>
+                              <strong>Notes:</strong> {selectedCheck.notes}
+                            </div>
+                          )}
                           {selectedCheck.corrective_action && (
                             <div>
                               <strong>Corrective Action:</strong>{" "}
@@ -2390,6 +2576,12 @@ export default function ComprehensiveCompliancePage() {
                             <div>
                               <strong>Responsible Person:</strong>{" "}
                               {selectedCheck.responsible_party}
+                            </div>
+                          )}
+                          {selectedCheck.evidence && (
+                            <div>
+                              <strong>Evidence:</strong>{" "}
+                              {selectedCheck.evidence}
                             </div>
                           )}
                         </div>
@@ -2498,11 +2690,7 @@ export default function ComprehensiveCompliancePage() {
                     onSelectionChange={(keys) =>
                       setNewCheckData((prev) => ({
                         ...prev,
-                        severity: Array.from(keys)[0] as
-                          | "low"
-                          | "medium"
-                          | "high"
-                          | "critical",
+                        severity: Array.from(keys)[0] as any,
                       }))
                     }
                   >
@@ -2520,6 +2708,18 @@ export default function ComprehensiveCompliancePage() {
                     setNewCheckData((prev) => ({
                       ...prev,
                       requirement_title: e.target.value,
+                    }))
+                  }
+                />
+
+                <Textarea
+                  label="Requirement Description"
+                  placeholder="Detailed description of the requirement"
+                  value={newCheckData.requirement_description}
+                  onChange={(e) =>
+                    setNewCheckData((prev) => ({
+                      ...prev,
+                      requirement_description: e.target.value,
                     }))
                   }
                 />
@@ -2570,6 +2770,18 @@ export default function ComprehensiveCompliancePage() {
                     setNewCheckData((prev) => ({
                       ...prev,
                       corrective_action: e.target.value,
+                    }))
+                  }
+                />
+
+                <Textarea
+                  label="Evidence"
+                  placeholder="Supporting evidence or documentation"
+                  value={newCheckData.evidence}
+                  onChange={(e) =>
+                    setNewCheckData((prev) => ({
+                      ...prev,
+                      evidence: e.target.value,
                     }))
                   }
                 />
@@ -2655,6 +2867,52 @@ export default function ComprehensiveCompliancePage() {
                         )
                       }
                     />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Input
+                        label="Target Completion Date"
+                        type="date"
+                        value={
+                          editingCheck.target_completion_date
+                            ? new Date(editingCheck.target_completion_date)
+                                .toISOString()
+                                .split("T")[0]
+                            : ""
+                        }
+                        onChange={(e) =>
+                          setEditingCheck((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  target_completion_date: e.target.value,
+                                }
+                              : null
+                          )
+                        }
+                      />
+
+                      <Input
+                        label="Responsible Party"
+                        value={editingCheck.responsible_party || ""}
+                        onChange={(e) =>
+                          setEditingCheck((prev) =>
+                            prev
+                              ? { ...prev, responsible_party: e.target.value }
+                              : null
+                          )
+                        }
+                      />
+                    </div>
+
+                    <Textarea
+                      label="Evidence"
+                      value={editingCheck.evidence || ""}
+                      onChange={(e) =>
+                        setEditingCheck((prev) =>
+                          prev ? { ...prev, evidence: e.target.value } : null
+                        )
+                      }
+                    />
                   </>
                 )}
               </ModalBody>
@@ -2716,7 +2974,7 @@ export default function ComprehensiveCompliancePage() {
                         </h4>
                       </CardHeader>
                       <CardBody>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                           <div className="text-center">
                             <div className="text-2xl font-bold text-foreground">
                               {complianceTrends.analysis?.trend_direction ||
@@ -2749,6 +3007,67 @@ export default function ComprehensiveCompliancePage() {
                             </div>
                             <div className="text-sm text-default-500">
                               Gap to Target
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-2xl font-bold text-primary">
+                              {safeToFixed(
+                                complianceTrends.performance_metrics
+                                  ?.consistency_score,
+                                1
+                              )}
+                            </div>
+                            <div className="text-sm text-default-500">
+                              Consistency Score
+                            </div>
+                          </div>
+                        </div>
+                      </CardBody>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <h4 className="font-semibold">Performance Metrics</h4>
+                      </CardHeader>
+                      <CardBody>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="text-center">
+                            <div className="text-lg font-bold">
+                              {safeToFixed(
+                                complianceTrends.performance_metrics
+                                  ?.monthly_average,
+                                1
+                              )}
+                              %
+                            </div>
+                            <div className="text-sm text-default-500">
+                              Monthly Average
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-lg font-bold">
+                              {safeToFixed(
+                                complianceTrends.performance_metrics
+                                  ?.quarterly_average,
+                                1
+                              )}
+                              %
+                            </div>
+                            <div className="text-sm text-default-500">
+                              Quarterly Average
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-lg font-bold">
+                              {safeToFixed(
+                                complianceTrends.performance_metrics
+                                  ?.yearly_average,
+                                1
+                              )}
+                              %
+                            </div>
+                            <div className="text-sm text-default-500">
+                              Yearly Average
                             </div>
                           </div>
                         </div>
@@ -2792,6 +3111,14 @@ export default function ComprehensiveCompliancePage() {
                                         Critical Issues
                                       </div>
                                     </div>
+                                    <div className="text-right">
+                                      <div className="font-bold">
+                                        {safeInteger(trend.total_checks)}
+                                      </div>
+                                      <div className="text-sm text-default-500">
+                                        Total Checks
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                                 <Progress
@@ -2803,7 +3130,7 @@ export default function ComprehensiveCompliancePage() {
                                   }
                                   size="sm"
                                 />
-                                <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+                                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                                   {trend.standard_breakdown &&
                                     Object.entries(
                                       trend.standard_breakdown
@@ -2827,7 +3154,7 @@ export default function ComprehensiveCompliancePage() {
                           {(!complianceTrends.trends ||
                             complianceTrends.trends.length === 0) && (
                             <div className="text-sm text-default-500 italic">
-                              No trend data available
+                              No trend data available for this building
                             </div>
                           )}
                         </div>
@@ -2836,7 +3163,7 @@ export default function ComprehensiveCompliancePage() {
 
                     <Card>
                       <CardHeader>
-                        <h4 className="font-semibold">Performance Analysis</h4>
+                        <h4 className="font-semibold">Analysis Summary</h4>
                       </CardHeader>
                       <CardBody>
                         <div className="space-y-3">
@@ -2880,10 +3207,43 @@ export default function ComprehensiveCompliancePage() {
                               %
                             </span>
                           </div>
+                          <div className="flex items-center justify-between">
+                            <span>Gap to Target:</span>
+                            <span
+                              className={`font-medium ${
+                                safeNumber(
+                                  complianceTrends.analysis?.gap_to_target
+                                ) > 0
+                                  ? "text-danger"
+                                  : "text-success"
+                              }`}
+                            >
+                              {safeToFixed(
+                                complianceTrends.analysis?.gap_to_target,
+                                1
+                              )}
+                              %
+                            </span>
+                          </div>
                         </div>
                       </CardBody>
                     </Card>
                   </div>
+                )}
+
+                {!complianceTrends && selectedBuilding && (
+                  <Card>
+                    <CardBody className="text-center py-12">
+                      <TrendingUp className="w-12 h-12 text-default-300 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-foreground mb-2">
+                        No Trends Data Available
+                      </h3>
+                      <p className="text-default-500">
+                        No compliance trends data found for the selected
+                        building.
+                      </p>
+                    </CardBody>
+                  </Card>
                 )}
               </ModalBody>
               <ModalFooter>
@@ -2893,6 +3253,7 @@ export default function ComprehensiveCompliancePage() {
                 <Button
                   color="primary"
                   startContent={<Download className="w-4 h-4" />}
+                  isDisabled={!complianceTrends}
                 >
                   Export Trends
                 </Button>
