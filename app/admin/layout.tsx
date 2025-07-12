@@ -576,7 +576,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
                   </div>
                   <div>
                     <span className="font-bold text-white text-lg tracking-tight">
-                      BacusAuditEnergy Platform
+                      BacusEnergyAudit Platform
                     </span>
                     <p className="text-xs text-slate-400">Philippines</p>
                   </div>
