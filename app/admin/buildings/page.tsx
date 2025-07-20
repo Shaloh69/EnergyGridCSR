@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 
 // HeroUI Components
 import { Button } from "@heroui/button";
@@ -8,7 +8,6 @@ import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Input } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
 import { Chip } from "@heroui/chip";
-import { Avatar } from "@heroui/avatar";
 import { Tabs, Tab } from "@heroui/tabs";
 import {
   Table,
@@ -40,7 +39,6 @@ import { Divider } from "@heroui/divider";
 import {
   Building,
   Search,
-  Filter,
   Plus,
   Eye,
   Edit,
@@ -58,7 +56,6 @@ import {
   Info,
   Shield,
   Power,
-  Construction,
   Home,
   Factory,
   GraduationCap,
@@ -66,129 +63,74 @@ import {
   MoreVertical,
 } from "lucide-react";
 
+// ✅ FIXED: Import your API hooks and types correctly
 import {
-  buildingsAPI,
-  equipmentAPI,
-  energyAPI,
-  auditsAPI,
-  alertsAPI,
-  powerQualityAPI,
-} from "@/lib/api";
+  useAuth,
+  useBuildings,
+  useBuilding,
+  useBuildingMutation,
+  useEquipment,
+  useEnergyStats,
+  usePowerQualityStats,
+  useAudits,
+  useAlerts,
+  useMaintenanceSchedule,
+} from "@/hooks/useApi";
 
 import type {
   Building as BuildingType,
+  BuildingQueryParams,
   Equipment,
-  EnergyReading,
-  PowerQualityEvent,
   Alert,
   Audit,
-  EnergyStatsResponse,
-  PowerQualityStatsResponse,
-  MaintenanceSchedule,
-  BuildingQueryParams,
-  ApiResponse,
 } from "@/types/api-types";
 
-import BuildingFormModal, {
-  BuildingFormData,
-} from "@/components/buildings/BuildingFormModal";
-
-interface ExtendedBuilding extends BuildingType {
-  equipment_count?: number;
-  audit_count?: number;
-  avg_compliance_score?: number;
-  last_energy_reading?: string;
-  total_consumption_kwh?: number;
-  avg_power_factor?: number;
-  equipment_summary?: {
-    total_equipment: number;
-    operational: number;
-    maintenance: number;
-    faulty: number;
-  };
-  compliance_status?: {
-    overall_score: number;
-    last_assessment: string;
-  };
-  performance_summary?: {
-    energy_intensity_kwh_sqm: number;
-    monthly_consumption_kwh: number;
-    efficiency_score: number;
-  };
+// Form interface for building creation/editing
+interface BuildingFormData {
+  name: string;
+  code: string;
+  areaSqm: number;
+  floors: number;
+  yearBuilt: number;
+  buildingType: "commercial" | "industrial" | "residential" | "institutional";
+  description: string;
+  status: "active" | "maintenance" | "inactive";
+  address: string;
 }
 
-const isApiResponse = <T,>(response: any): response is ApiResponse<T> => {
-  return (
-    response &&
-    typeof response === "object" &&
-    typeof response.success === "boolean" &&
-    typeof response.message === "string" &&
-    "data" in response
-  );
-};
-
-const isArrayOfBuildings = (data: any): data is ExtendedBuilding[] => {
-  return Array.isArray(data) && (data.length === 0 || "id" in data[0]);
-};
-
-const hasNestedData = (
-  data: any
-): data is { data: ExtendedBuilding[]; pagination?: any } => {
-  return (
-    data &&
-    typeof data === "object" &&
-    "data" in data &&
-    Array.isArray(data.data)
-  );
-};
-
 const BuildingsPage: React.FC = () => {
-  const [buildings, setBuildings] = useState<ExtendedBuilding[]>([]);
-  const [selectedBuilding, setSelectedBuilding] =
-    useState<ExtendedBuilding | null>(null);
-  const [buildingEquipment, setBuildingEquipment] = useState<Equipment[]>([]);
-  const [buildingEnergy, setBuildingEnergy] = useState<EnergyReading[]>([]);
-  const [buildingEnergyStats, setBuildingEnergyStats] =
-    useState<EnergyStatsResponse | null>(null);
-  const [buildingPowerQuality, setBuildingPowerQuality] = useState<
-    PowerQualityEvent[]
-  >([]);
-  const [buildingPowerQualityStats, setBuildingPowerQualityStats] =
-    useState<PowerQualityStatsResponse | null>(null);
-  const [buildingAudits, setBuildingAudits] = useState<Audit[]>([]);
-  const [buildingAlerts, setBuildingAlerts] = useState<Alert[]>([]);
-  const [maintenanceSchedule, setMaintenanceSchedule] =
-    useState<MaintenanceSchedule | null>(null);
+  // ✅ Authentication check
+  const { isAuthenticated, user } = useAuth();
 
-  const [loading, setLoading] = useState(true);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [selectedTab, setSelectedTab] = useState("overview");
+  // ✅ View and selection state
   const [viewMode, setViewMode] = useState<"list" | "details">("list");
+  const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(
+    null
+  );
+  const [selectedTab, setSelectedTab] = useState("overview");
 
+  // ✅ Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
+  const [currentPage, setCurrentPage] = useState(1);
 
+  // ✅ Form state
   const [buildingForm, setBuildingForm] = useState<BuildingFormData>({
     name: "",
     code: "",
-    area_sqm: 0,
+    areaSqm: 0,
     floors: 1,
-    year_built: new Date().getFullYear(),
-    building_type: "commercial",
+    yearBuilt: new Date().getFullYear(),
+    buildingType: "commercial",
     description: "",
     status: "active",
     address: "",
   });
 
+  // ✅ Modal controls
   const {
     isOpen: isCreateOpen,
     onOpen: onCreateOpen,
@@ -205,574 +147,259 @@ const BuildingsPage: React.FC = () => {
     onClose: onDeleteClose,
   } = useDisclosure();
 
+  // ✅ Success message state
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // ✅ Build query parameters for buildings list
+  const buildingsParams = useMemo(
+    (): BuildingQueryParams => ({
+      page: currentPage,
+      limit: 20,
+      sortBy: sortBy as any,
+      sortOrder,
+      ...(searchQuery.trim() && { search: searchQuery.trim() }),
+      ...(statusFilter !== "all" && { status: statusFilter as any }),
+      ...(typeFilter !== "all" && { buildingType: typeFilter as any }),
+    }),
+    [currentPage, searchQuery, statusFilter, typeFilter, sortBy, sortOrder]
+  );
+
+  // ✅ FIXED: API Hooks - Buildings list with proper error handling
+  const {
+    data: buildings = [], // ✅ Default to empty array
+    pagination,
+    loading: buildingsLoading,
+    error: buildingsError,
+    refresh: refreshBuildings,
+    isError: buildingsIsError,
+  } = useBuildings(buildingsParams, {
+    immediate: true,
+    dependencies: [
+      searchQuery,
+      statusFilter,
+      typeFilter,
+      sortBy,
+      sortOrder,
+      currentPage,
+    ],
+  });
+
+  // ✅ Individual building details (only when selected)
+  const {
+    data: selectedBuilding,
+    loading: buildingLoading,
+    error: buildingError,
+    refresh: refreshBuilding,
+    isError: buildingIsError,
+  } = useBuilding(selectedBuildingId!, {
+    immediate: !!selectedBuildingId,
+  });
+
+  // ✅ FIXED: Building equipment with proper error handling
+  const {
+    data: buildingEquipment = [], // ✅ Default to empty array
+    loading: equipmentLoading,
+    error: equipmentError,
+    isError: equipmentIsError,
+  } = useEquipment(
+    { buildingId: selectedBuildingId! },
+    {
+      immediate: !!selectedBuildingId,
+    }
+  );
+
+  // ✅ Energy statistics (only when building is selected)
+  const {
+    data: energyStats,
+    loading: energyStatsLoading,
+    error: energyStatsError,
+    isError: energyStatsIsError,
+  } = useEnergyStats(selectedBuildingId!, undefined, {
+    immediate: !!selectedBuildingId,
+  });
+
+  // ✅ Power quality statistics (only when building is selected)
+  const {
+    data: powerQualityStats,
+    loading: powerQualityLoading,
+    error: powerQualityStatsError,
+    isError: powerQualityStatsIsError,
+  } = usePowerQualityStats(selectedBuildingId!, undefined, {
+    immediate: !!selectedBuildingId,
+  });
+
+  // ✅ FIXED: Building audits with proper error handling
+  const {
+    data: buildingAudits = [], // ✅ Default to empty array
+    loading: auditsLoading,
+    error: auditsError,
+    isError: auditsIsError,
+  } = useAudits(
+    { buildingId: selectedBuildingId! },
+    {
+      immediate: !!selectedBuildingId,
+    }
+  );
+
+  // ✅ FIXED: Building alerts with proper error handling
+  const {
+    data: buildingAlerts = [], // ✅ Default to empty array
+    loading: alertsLoading,
+    error: alertsError,
+    isError: alertsIsError,
+  } = useAlerts(
+    { buildingId: selectedBuildingId!, limit: 50 },
+    {
+      immediate: !!selectedBuildingId,
+    }
+  );
+
+  // ✅ Maintenance schedule (only when building is selected)
+  const {
+    data: maintenanceSchedule,
+    loading: maintenanceLoading,
+    error: maintenanceError,
+    isError: maintenanceIsError,
+  } = useMaintenanceSchedule(selectedBuildingId!, {
+    immediate: !!selectedBuildingId,
+  });
+
+  // ✅ Building mutations
+  const {
+    createBuilding,
+    updateBuilding,
+    deleteBuilding,
+    loading: mutationLoading,
+    error: mutationError,
+  } = useBuildingMutation();
+
+  // ✅ FIXED: Extract pagination data safely with proper fallbacks
+  const totalPages = pagination?.totalPages || 1;
+  const totalCount = pagination?.totalCount || 0;
+  const hasNextPage = pagination?.hasNextPage || false;
+  const hasPrevPage = pagination?.hasPrevPage || false;
+
+  // ✅ Auto-clear success messages
+  React.useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  // ✅ Reset page when filters change
+  React.useEffect(() => {
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  }, [searchQuery, statusFilter, typeFilter, sortBy, sortOrder]);
+
+  // ✅ Handlers
   const handleCreateOpen = useCallback(() => {
-    setError(null);
-    setSuccessMessage(null);
     resetForm();
     onCreateOpen();
   }, [onCreateOpen]);
 
   const handleEditOpen = useCallback(() => {
-    setError(null);
-    setSuccessMessage(null);
-    prepareEditForm();
-    onEditOpen();
-  }, [onEditOpen]);
-
-  const handleDeleteOpen = useCallback(() => {
-    setError(null);
-    setSuccessMessage(null);
-    onDeleteOpen();
-  }, [onDeleteOpen]);
-
-  const handleCreateClose = useCallback(() => {
-    setError(null);
-    setSuccessMessage(null);
-    onCreateClose();
-  }, [onCreateClose]);
-
-  const handleEditClose = useCallback(() => {
-    setError(null);
-    setSuccessMessage(null);
-    onEditClose();
-  }, [onEditClose]);
-
-  const handleDeleteClose = useCallback(() => {
-    setError(null);
-    setSuccessMessage(null);
-    onDeleteClose();
-  }, [onDeleteClose]);
-
-  const checkBuildingData = useCallback(async (buildingId: number) => {
-    try {
-      console.log(
-        `🔍 Performing comprehensive data check for building ${buildingId}`
-      );
-
-      const endDate = new Date().toISOString().split("T")[0];
-      const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0];
-
-      const checks = await Promise.allSettled([
-        equipmentAPI.getAll({ building_id: buildingId }),
-        energyAPI.getConsumption({
-          building_id: buildingId,
-          start_date: startDate,
-          end_date: endDate,
-          interval: "daily",
-        }),
-        powerQualityAPI.getData({
-          building_id: buildingId,
-          start_date: startDate,
-          end_date: endDate,
-        }),
-        auditsAPI.getAll({ building_id: buildingId }),
-        alertsAPI.getAll({ building_id: buildingId }),
-        equipmentAPI.getMaintenanceSchedule(buildingId),
-      ]);
-
-      const results = {
-        equipment: 0,
-        energy_readings: 0,
-        power_quality_events: 0,
-        audits: 0,
-        alerts: 0,
-        maintenance_records: 0,
-      };
-
-      checks.forEach((check, index) => {
-        if (check.status === "fulfilled" && check.value.data?.success) {
-          const data = check.value.data.data;
-          switch (index) {
-            case 0:
-              results.equipment = Array.isArray(data) ? data.length : 0;
-              break;
-            case 1:
-              results.energy_readings =
-                data?.daily_data?.length ||
-                data?.hourly_data?.length ||
-                (Array.isArray(data) ? data.length : 0);
-              break;
-            case 2:
-              results.power_quality_events = data?.events?.length || 0;
-              break;
-            case 3:
-              results.audits = Array.isArray(data) ? data.length : 0;
-              break;
-            case 4:
-              results.alerts = Array.isArray(data) ? data.length : 0;
-              break;
-            case 5:
-              results.maintenance_records = data?.schedule?.length || 0;
-              break;
-          }
-        }
-      });
-
-      console.log("📊 Comprehensive data check results:", results);
-      return results;
-    } catch (error) {
-      console.error("❌ Error checking building data:", error);
-      return null;
+    if (selectedBuilding) {
+      prepareEditForm();
+      onEditOpen();
     }
+  }, [selectedBuilding, onEditOpen]);
+
+  const handleBuildingSelect = useCallback((building: BuildingType) => {
+    setSelectedBuildingId(building.id);
+    setViewMode("details");
+    setSelectedTab("overview");
   }, []);
 
-  useEffect(() => {
-    if (successMessage) {
-      const timer = setTimeout(() => {
-        setSuccessMessage(null);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [successMessage]);
-
-  const loadBuildings = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const params: BuildingQueryParams = {
-        page: currentPage,
-        limit: 20,
-        sortBy: sortBy as any,
-        sortOrder,
-        ...(searchQuery.trim() && { search: searchQuery.trim() }),
-        ...(statusFilter !== "all" && { status: statusFilter as any }),
-        ...(typeFilter !== "all" && { building_type: typeFilter as any }),
-      };
-
-      console.log("🏢 Loading buildings with params:", params);
-      const response = await buildingsAPI.getAll(params);
-
-      if (response.data && response.data.success) {
-        const responseData = response.data.data;
-        let buildingsData: ExtendedBuilding[] = [];
-        let paginationData = response.data.pagination;
-
-        if (isArrayOfBuildings(responseData)) {
-          buildingsData = responseData;
-        } else if (hasNestedData(responseData)) {
-          buildingsData = responseData.data;
-          paginationData = responseData.pagination || response.data.pagination;
-        } else if (responseData === null || responseData === undefined) {
-          buildingsData = [];
-        } else {
-          throw new Error("Unexpected response format from server");
-        }
-
-        setBuildings(buildingsData);
-
-        if (paginationData) {
-          setTotalPages(paginationData.total_pages || 1);
-          setTotalCount(paginationData.total_count || 0);
-        } else {
-          setTotalPages(1);
-          setTotalCount(buildingsData.length);
-        }
-      } else {
-        throw new Error(response.data?.message || "Failed to load buildings");
-      }
-    } catch (error: any) {
-      console.error("❌ Failed to load buildings:", error);
-
-      let errorMessage = "Failed to load buildings";
-      if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.response?.data?.error) {
-        errorMessage = error.response.data.error;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-
-      setError(errorMessage);
-      setBuildings([]);
-      setTotalPages(1);
-      setTotalCount(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentPage, searchQuery, statusFilter, typeFilter, sortBy, sortOrder]);
-
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      const handler = setTimeout(() => {
-        if (currentPage !== 1) {
-          setCurrentPage(1);
-        } else {
-          loadBuildings();
-        }
-      }, 500);
-      return () => clearTimeout(handler);
-    } else {
-      loadBuildings();
-    }
-  }, [loadBuildings, searchQuery]);
-
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      if (currentPage !== 1) {
-        setCurrentPage(1);
-      } else {
-        loadBuildings();
-      }
-    }
-  }, [statusFilter, typeFilter, sortBy, sortOrder]);
-
-  useEffect(() => {
-    if (currentPage > 1) {
-      loadBuildings();
-    }
-  }, [currentPage]);
-
-  const loadBuildingDetails = useCallback(
-    async (building: ExtendedBuilding) => {
-      try {
-        setDetailsLoading(true);
-        setError(null);
-        setSelectedBuilding(building);
-
-        try {
-          const buildingResponse = await buildingsAPI.getById(building.id);
-          if (buildingResponse.data?.success) {
-            setSelectedBuilding(buildingResponse.data.data);
-          }
-        } catch (error) {
-          console.warn("⚠️ Failed to load enhanced building details:", error);
-        }
-
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setMonth(startDate.getMonth() - 3);
-
-        const startDateStr = startDate.toISOString().split("T")[0];
-        const endDateStr = endDate.toISOString().split("T")[0];
-
-        const dataPromises = [
-          equipmentAPI
-            .getAll({ building_id: building.id })
-            .catch((e) => ({ error: e })),
-          energyAPI
-            .getConsumption({
-              building_id: building.id,
-              start_date: startDateStr,
-              end_date: endDateStr,
-              interval: "daily",
-            })
-            .catch((e) => ({ error: e })),
-          energyAPI.getStats(building.id).catch((e) => ({ error: e })),
-          powerQualityAPI
-            .getData({
-              building_id: building.id,
-              start_date: startDateStr,
-              end_date: endDateStr,
-            })
-            .catch((e) => ({ error: e })),
-          powerQualityAPI.getStats(building.id).catch((e) => ({ error: e })),
-          auditsAPI
-            .getAll({ building_id: building.id })
-            .catch((e) => ({ error: e })),
-          alertsAPI
-            .getAll({ building_id: building.id, limit: 50 })
-            .catch((e) => ({ error: e })),
-          equipmentAPI
-            .getMaintenanceSchedule(building.id)
-            .catch((e) => ({ error: e })),
-        ];
-
-        const [
-          equipmentResponse,
-          energyResponse,
-          energyStatsResponse,
-          powerQualityResponse,
-          powerQualityStatsResponse,
-          auditsResponse,
-          alertsResponse,
-          maintenanceResponse,
-        ] = await Promise.all(dataPromises);
-
-        if ("error" in equipmentResponse) {
-          setBuildingEquipment([]);
-        } else if (equipmentResponse.data?.success) {
-          const data = equipmentResponse.data.data;
-          setBuildingEquipment(Array.isArray(data) ? data : []);
-        } else {
-          setBuildingEquipment([]);
-        }
-
-        if ("error" in energyResponse) {
-          setBuildingEnergy([]);
-        } else if (energyResponse.data?.success) {
-          const data = energyResponse.data.data;
-          setBuildingEnergy(data?.daily_data || data?.hourly_data || []);
-        } else {
-          setBuildingEnergy([]);
-        }
-
-        if ("error" in energyStatsResponse) {
-          setBuildingEnergyStats(null);
-        } else if (energyStatsResponse.data?.success) {
-          setBuildingEnergyStats(energyStatsResponse.data.data);
-        } else {
-          setBuildingEnergyStats(null);
-        }
-
-        if ("error" in powerQualityResponse) {
-          setBuildingPowerQuality([]);
-        } else if (powerQualityResponse.data?.success) {
-          const data = powerQualityResponse.data.data;
-          setBuildingPowerQuality(data?.events || []);
-        } else {
-          setBuildingPowerQuality([]);
-        }
-
-        if ("error" in powerQualityStatsResponse) {
-          setBuildingPowerQualityStats(null);
-        } else if (powerQualityStatsResponse.data?.success) {
-          setBuildingPowerQualityStats(powerQualityStatsResponse.data.data);
-        } else {
-          setBuildingPowerQualityStats(null);
-        }
-
-        if ("error" in auditsResponse) {
-          setBuildingAudits([]);
-        } else if (auditsResponse.data?.success) {
-          const data = auditsResponse.data.data;
-          setBuildingAudits(Array.isArray(data) ? data : []);
-        } else {
-          setBuildingAudits([]);
-        }
-
-        if ("error" in alertsResponse) {
-          setBuildingAlerts([]);
-        } else if (alertsResponse.data?.success) {
-          const data = alertsResponse.data.data;
-          setBuildingAlerts(Array.isArray(data) ? data : []);
-        } else {
-          setBuildingAlerts([]);
-        }
-
-        if ("error" in maintenanceResponse) {
-          setMaintenanceSchedule(null);
-        } else if (maintenanceResponse.data?.success) {
-          setMaintenanceSchedule(maintenanceResponse.data.data);
-        } else {
-          setMaintenanceSchedule(null);
-        }
-
-        console.log("✅ Building details loaded successfully");
-      } catch (error: any) {
-        console.error("❌ Failed to load building details:", error);
-        setError("Failed to load building details. Please try again.");
-      } finally {
-        setDetailsLoading(false);
-      }
-    },
-    []
-  );
+  const handleBackToList = useCallback(() => {
+    setViewMode("list");
+    setSelectedBuildingId(null);
+    setSelectedTab("overview");
+  }, []);
 
   const handleSubmit = useCallback(
     async (isEdit: boolean = false) => {
       try {
-        setSubmitLoading(true);
-        setError(null);
-
-        if (!buildingForm.name?.trim()) {
-          throw new Error("Building name is required");
-        }
-        if (!buildingForm.code?.trim()) {
-          throw new Error("Building code is required");
+        // ✅ Validate required fields
+        if (!buildingForm.name.trim() || !buildingForm.code.trim()) {
+          return;
         }
 
+        // ✅ Transform form data to server format
         const submitData = {
-          ...buildingForm,
           name: buildingForm.name.trim(),
           code: buildingForm.code.trim(),
           description: buildingForm.description?.trim() || "",
           address: buildingForm.address?.trim() || "",
-          area_sqm: Number(buildingForm.area_sqm) || 0,
+          areaSqm: Number(buildingForm.areaSqm) || 0,
           floors: Number(buildingForm.floors) || 1,
-          year_built:
-            Number(buildingForm.year_built) || new Date().getFullYear(),
+          yearBuilt: Number(buildingForm.yearBuilt) || new Date().getFullYear(),
+          buildingType: buildingForm.buildingType,
+          status: buildingForm.status,
         };
 
-        let response;
         if (isEdit && selectedBuilding) {
-          response = await buildingsAPI.update(selectedBuilding.id, submitData);
-          if (response.data.success) {
-            setSelectedBuilding(response.data.data);
-            setSuccessMessage("Building updated successfully!");
-            handleEditClose();
-          }
+          await updateBuilding(selectedBuilding.id, submitData);
+          setSuccessMessage("Building updated successfully!");
+          onEditClose();
+          await Promise.all([refreshBuildings(), refreshBuilding()]);
         } else {
-          response = await buildingsAPI.create(submitData);
-          if (response.data.success) {
-            setSuccessMessage("Building created successfully!");
-            handleCreateClose();
-            resetForm();
-          }
+          await createBuilding(submitData);
+          setSuccessMessage("Building created successfully!");
+          onCreateClose();
+          resetForm();
+          await refreshBuildings();
         }
-
-        await loadBuildings();
-      } catch (error: any) {
-        console.error("❌ Form submission failed:", error);
-
-        let errorMessage = "Operation failed";
-        if (error.response?.data?.validation_errors) {
-          const validationErrors = error.response.data.validation_errors;
-          errorMessage = validationErrors
-            .map((err: any) => `${err.field}: ${err.message}`)
-            .join(", ");
-        } else if (error.response?.data?.message) {
-          errorMessage = error.response.data.message;
-        } else if (error.message) {
-          errorMessage = error.message;
-        }
-
-        setError(errorMessage);
-      } finally {
-        setSubmitLoading(false);
+      } catch (error) {
+        console.error("Form submission failed:", error);
+        // Error is already handled by the mutation hook
       }
     },
     [
       buildingForm,
       selectedBuilding,
-      handleEditClose,
-      handleCreateClose,
-      loadBuildings,
+      updateBuilding,
+      createBuilding,
+      onEditClose,
+      onCreateClose,
+      refreshBuildings,
+      refreshBuilding,
     ]
   );
-  const handleBackToList = useCallback(() => {
-    setViewMode("list");
-    setSelectedBuilding(null);
-    setBuildingEquipment([]);
-    setBuildingEnergy([]);
-    setBuildingEnergyStats(null);
-    setBuildingPowerQuality([]);
-    setBuildingPowerQualityStats(null);
-    setBuildingAudits([]);
-    setBuildingAlerts([]);
-    setMaintenanceSchedule(null);
-    setSelectedTab("overview");
-    setError(null);
-  }, []);
+
   const handleDelete = useCallback(async () => {
     if (!selectedBuilding) return;
 
     try {
-      setSubmitLoading(true);
-      setError(null);
-
-      const dataCheck = await checkBuildingData(selectedBuilding.id);
-
-      if (dataCheck) {
-        const totalData = Object.values(dataCheck).reduce(
-          (sum, count) => sum + count,
-          0
-        );
-        console.log(
-          `📊 Found ${totalData} total associated records:`,
-          dataCheck
-        );
-      }
-
-      await buildingsAPI.delete(selectedBuilding.id);
-
+      await deleteBuilding(selectedBuilding.id);
       setSuccessMessage(
         `Building "${selectedBuilding.name}" has been deleted successfully.`
       );
-      handleDeleteClose();
+      onDeleteClose();
       handleBackToList();
-      await loadBuildings();
-    } catch (error: any) {
-      console.error("❌ Delete failed:", error);
-
-      let errorMessage = "Delete operation failed";
-      if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-
-      if (
-        errorMessage.includes("associated") ||
-        errorMessage.includes("constraint") ||
-        errorMessage.includes("foreign key")
-      ) {
-        const enhancedError = `Cannot delete building with associated data.
-
-The server has detected data relationships that prevent deletion:
-• Energy consumption records
-• Equipment assignments
-• Audit histories
-• Alert records
-• Maintenance logs
-• System references
-
-Recommendation: Set the building status to "Inactive" to safely remove it from active use while preserving data integrity.`;
-
-        setError(enhancedError);
-      } else {
-        setError(errorMessage);
-      }
-    } finally {
-      setSubmitLoading(false);
+      await refreshBuildings();
+    } catch (error) {
+      console.error("Delete failed:", error);
+      // Error is already handled by the mutation hook
     }
   }, [
     selectedBuilding,
-    checkBuildingData,
-    handleDeleteClose,
+    deleteBuilding,
+    onDeleteClose,
     handleBackToList,
-    loadBuildings,
-  ]);
-
-  const handleSetInactive = useCallback(async () => {
-    if (!selectedBuilding) return;
-
-    try {
-      setSubmitLoading(true);
-      setError(null);
-
-      const response = await buildingsAPI.update(selectedBuilding.id, {
-        status: "inactive",
-      });
-
-      if (response.data.success) {
-        setSelectedBuilding(response.data.data);
-        setSuccessMessage(
-          `Building "${selectedBuilding.name}" has been set to inactive status.`
-        );
-        handleDeleteClose();
-        await loadBuildings();
-
-        if (viewMode === "details") {
-          await loadBuildingDetails(response.data.data);
-        }
-      }
-    } catch (error: any) {
-      console.error("❌ Set inactive failed:", error);
-      setError(
-        error.response?.data?.message || "Failed to set building inactive"
-      );
-    } finally {
-      setSubmitLoading(false);
-    }
-  }, [
-    selectedBuilding,
-    handleDeleteClose,
-    loadBuildings,
-    viewMode,
-    loadBuildingDetails,
+    refreshBuildings,
   ]);
 
   const resetForm = useCallback(() => {
     setBuildingForm({
       name: "",
       code: "",
-      area_sqm: 0,
+      areaSqm: 0,
       floors: 1,
-      year_built: new Date().getFullYear(),
-      building_type: "commercial",
+      yearBuilt: new Date().getFullYear(),
+      buildingType: "commercial",
       description: "",
       status: "active",
       address: "",
@@ -784,54 +411,18 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
       setBuildingForm({
         name: selectedBuilding.name || "",
         code: selectedBuilding.code || "",
-        area_sqm: selectedBuilding.area_sqm || 0,
+        areaSqm: selectedBuilding.areaSqm || 0,
         floors: selectedBuilding.floors || 1,
-        year_built: selectedBuilding.year_built || new Date().getFullYear(),
-        building_type:
-          (selectedBuilding.building_type as
-            | "commercial"
-            | "industrial"
-            | "residential"
-            | "institutional") || "commercial",
+        yearBuilt: selectedBuilding.yearBuilt || new Date().getFullYear(),
+        buildingType: selectedBuilding.buildingType || "commercial",
         description: selectedBuilding.description || "",
-        status:
-          (selectedBuilding.status as
-            | "active"
-            | "maintenance"
-            | "inactive"
-            | "construction") || "active",
+        status: selectedBuilding.status || "active",
         address: selectedBuilding.address || "",
       });
     }
   }, [selectedBuilding]);
 
-  const handleBuildingSelect = useCallback(
-    (building: ExtendedBuilding) => {
-      setViewMode("details");
-      loadBuildingDetails(building);
-    },
-    [loadBuildingDetails]
-  );
-
-  const filteredBuildings = useMemo(() => {
-    if (!Array.isArray(buildings)) return [];
-
-    return buildings.filter((building) => {
-      const matchesSearch =
-        !searchQuery.trim() ||
-        building.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        building.code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        building.description?.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchesStatus =
-        statusFilter === "all" || building.status === statusFilter;
-      const matchesType =
-        typeFilter === "all" || building.building_type === typeFilter;
-
-      return matchesSearch && matchesStatus && matchesType;
-    });
-  }, [buildings, searchQuery, statusFilter, typeFilter]);
-
+  // ✅ FIXED: Enhanced utility functions with proper null/undefined handling
   const safeFormat = {
     number: (value: any, decimals: number = 2): string => {
       if (value === null || value === undefined || value === "") return "N/A";
@@ -866,7 +457,6 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
       active: { color: "success" as const, label: "Active" },
       maintenance: { color: "warning" as const, label: "Maintenance" },
       inactive: { color: "default" as const, label: "Inactive" },
-      construction: { color: "primary" as const, label: "Construction" },
     };
 
     const config =
@@ -923,8 +513,233 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
     );
   }, []);
 
+  // ✅ FIXED: Summary statistics with better array handling
+  const summaryStats = useMemo(() => {
+    // ✅ Ensure buildings is always an array
+    const buildingsArray = Array.isArray(buildings) ? buildings : [];
+
+    return {
+      total: totalCount || buildingsArray.length,
+      active: buildingsArray.filter((b) => b.status === "active").length,
+      maintenance: buildingsArray.filter((b) => b.status === "maintenance")
+        .length,
+      totalArea: buildingsArray.reduce((sum, b) => sum + (b.areaSqm || 0), 0),
+    };
+  }, [buildings, totalCount]);
+
+  // ✅ FIXED: Details loading state properly checks all data types
+  const detailsLoading =
+    buildingLoading ||
+    equipmentLoading ||
+    energyStatsLoading ||
+    powerQualityLoading ||
+    auditsLoading ||
+    alertsLoading ||
+    maintenanceLoading;
+
+  // ✅ FIXED: Check authentication first
+  if (!isAuthenticated) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardBody className="text-center p-8">
+            <AlertTriangle className="w-16 h-16 text-warning mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-foreground mb-2">
+              Authentication Required
+            </h3>
+            <p className="text-default-500 mb-4">
+              Please log in to access the buildings management page.
+            </p>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
+
+  // ✅ FIXED: Main error display with better error handling
+  if (buildingsIsError && buildings.length === 0 && !buildingsLoading) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardBody className="text-center p-8">
+            <AlertTriangle className="w-16 h-16 text-danger mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-foreground mb-2">
+              Error Loading Buildings
+            </h3>
+            <p className="text-default-500 mb-4">{buildingsError}</p>
+            <Button
+              color="primary"
+              onPress={refreshBuildings}
+              startContent={<RefreshCw className="w-4 h-4" />}
+              isLoading={buildingsLoading}
+            >
+              Retry
+            </Button>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
+
+  // ✅ Building Form Modal
+  const BuildingFormModal = () => (
+    <Modal
+      isOpen={isCreateOpen || isEditOpen}
+      onClose={isEditOpen ? onEditClose : onCreateClose}
+      size="2xl"
+      scrollBehavior="inside"
+    >
+      <ModalContent>
+        <ModalHeader>
+          <h2 className="text-xl font-semibold">
+            {isEditOpen ? "Edit Building" : "Create Building"}
+          </h2>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
+            {mutationError && (
+              <div className="p-3 bg-danger-50 border border-danger-200 rounded-lg">
+                <p className="text-danger-800 text-sm">{mutationError}</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Building Name"
+                placeholder="Enter building name"
+                value={buildingForm.name}
+                onValueChange={(value) =>
+                  setBuildingForm((prev) => ({ ...prev, name: value }))
+                }
+                isRequired
+                variant="bordered"
+              />
+              <Input
+                label="Building Code"
+                placeholder="Enter building code"
+                value={buildingForm.code}
+                onValueChange={(value) =>
+                  setBuildingForm((prev) => ({ ...prev, code: value }))
+                }
+                isRequired
+                variant="bordered"
+              />
+              <Input
+                label="Area (m²)"
+                type="number"
+                placeholder="Enter area in square meters"
+                value={buildingForm.areaSqm?.toString() || ""}
+                onValueChange={(value) =>
+                  setBuildingForm((prev) => ({
+                    ...prev,
+                    areaSqm: Number(value) || 0,
+                  }))
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Floors"
+                type="number"
+                placeholder="Number of floors"
+                value={buildingForm.floors?.toString() || ""}
+                onValueChange={(value) =>
+                  setBuildingForm((prev) => ({
+                    ...prev,
+                    floors: Number(value) || 1,
+                  }))
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Year Built"
+                type="number"
+                placeholder="Year building was constructed"
+                value={buildingForm.yearBuilt?.toString() || ""}
+                onValueChange={(value) =>
+                  setBuildingForm((prev) => ({
+                    ...prev,
+                    yearBuilt: Number(value) || new Date().getFullYear(),
+                  }))
+                }
+                variant="bordered"
+              />
+              <Select
+                label="Building Type"
+                selectedKeys={[buildingForm.buildingType]}
+                onSelectionChange={(keys) =>
+                  setBuildingForm((prev) => ({
+                    ...prev,
+                    buildingType: Array.from(keys)[0] as any,
+                  }))
+                }
+                variant="bordered"
+              >
+                <SelectItem key="commercial">Commercial</SelectItem>
+                <SelectItem key="industrial">Industrial</SelectItem>
+                <SelectItem key="residential">Residential</SelectItem>
+                <SelectItem key="institutional">Institutional</SelectItem>
+              </Select>
+              <Select
+                label="Status"
+                selectedKeys={[buildingForm.status]}
+                onSelectionChange={(keys) =>
+                  setBuildingForm((prev) => ({
+                    ...prev,
+                    status: Array.from(keys)[0] as any,
+                  }))
+                }
+                variant="bordered"
+              >
+                <SelectItem key="active">Active</SelectItem>
+                <SelectItem key="maintenance">Maintenance</SelectItem>
+                <SelectItem key="inactive">Inactive</SelectItem>
+              </Select>
+              <Input
+                label="Address"
+                placeholder="Enter building address"
+                value={buildingForm.address}
+                onValueChange={(value) =>
+                  setBuildingForm((prev) => ({ ...prev, address: value }))
+                }
+                className="md:col-span-1"
+                variant="bordered"
+              />
+            </div>
+            <Input
+              label="Description"
+              placeholder="Enter building description"
+              value={buildingForm.description}
+              onValueChange={(value) =>
+                setBuildingForm((prev) => ({ ...prev, description: value }))
+              }
+              variant="bordered"
+            />
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="flat"
+            onPress={isEditOpen ? onEditClose : onCreateClose}
+            isDisabled={mutationLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="primary"
+            onPress={() => handleSubmit(isEditOpen)}
+            isLoading={mutationLoading}
+            isDisabled={!buildingForm.name.trim() || !buildingForm.code.trim()}
+          >
+            {isEditOpen ? "Update" : "Create"} Building
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  );
+
+  // ✅ Delete confirmation modal
   const DeleteConfirmationModal = () => (
-    <Modal isOpen={isDeleteOpen} onClose={handleDeleteClose} size="3xl">
+    <Modal isOpen={isDeleteOpen} onClose={onDeleteClose} size="lg">
       <ModalContent>
         <ModalHeader>
           <h2 className="text-xl font-semibold text-danger">Delete Building</h2>
@@ -944,19 +759,12 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
               </div>
             </div>
 
-            {error && (
+            {mutationError && (
               <div className="p-4 bg-warning-50 border border-warning-200 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <Info className="w-5 h-5 text-warning-600 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <p className="font-medium text-warning-800 mb-2">
-                      Deletion Not Allowed
-                    </p>
-                    <div className="text-sm text-warning-700 whitespace-pre-line">
-                      {error}
-                    </div>
-                  </div>
-                </div>
+                <p className="font-medium text-warning-800 mb-2">
+                  Deletion Error
+                </p>
+                <p className="text-sm text-warning-700">{mutationError}</p>
               </div>
             )}
 
@@ -976,170 +784,37 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                       {selectedBuilding.code}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-default-500">Status:</span>
-                    <span className="ml-2">
-                      {selectedBuilding.status &&
-                        renderStatusChip(selectedBuilding.status)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-default-500">Type:</span>
-                    <span className="ml-2">
-                      {selectedBuilding.building_type &&
-                        renderTypeChip(selectedBuilding.building_type)}
-                    </span>
-                  </div>
-                </div>
-
-                <h4 className="font-medium mt-4 mb-3">Associated Data:</h4>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-default-500">Equipment:</span>
-                    <span
-                      className={`ml-2 font-medium ${buildingEquipment.length > 0 ? "text-warning" : "text-success"}`}
-                    >
-                      {buildingEquipment.length} items
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-default-500">Audits:</span>
-                    <span
-                      className={`ml-2 font-medium ${buildingAudits.length > 0 ? "text-warning" : "text-success"}`}
-                    >
-                      {buildingAudits.length} records
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-default-500">Alerts:</span>
-                    <span
-                      className={`ml-2 font-medium ${buildingAlerts.length > 0 ? "text-warning" : "text-success"}`}
-                    >
-                      {buildingAlerts.length} records
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-default-500">Energy Data:</span>
-                    <span
-                      className={`ml-2 font-medium ${buildingEnergy.length > 0 ? "text-warning" : "text-success"}`}
-                    >
-                      {buildingEnergy.length} records
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-default-500">Power Quality:</span>
-                    <span
-                      className={`ml-2 font-medium ${buildingPowerQuality.length > 0 ? "text-warning" : "text-success"}`}
-                    >
-                      {buildingPowerQuality.length} events
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-default-500">Maintenance:</span>
-                    <span
-                      className={`ml-2 font-medium ${(maintenanceSchedule?.schedule?.length || 0) > 0 ? "text-warning" : "text-success"}`}
-                    >
-                      {maintenanceSchedule?.schedule?.length || 0} records
-                    </span>
-                  </div>
                 </div>
               </div>
             )}
           </div>
         </ModalBody>
         <ModalFooter>
-          <div className="flex gap-3 w-full">
-            <Button
-              variant="flat"
-              onPress={handleDeleteClose}
-              isDisabled={submitLoading}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-
-            {error &&
-            (error.includes("associated") ||
-              error.includes("constraint") ||
-              error.includes("Cannot delete")) ? (
-              <>
-                <Button
-                  color="warning"
-                  onPress={handleSetInactive}
-                  isLoading={submitLoading}
-                  startContent={<Power className="w-4 h-4" />}
-                  className="flex-1"
-                >
-                  Set Inactive Instead
-                </Button>
-                <Button
-                  color="danger"
-                  variant="bordered"
-                  onPress={handleDelete}
-                  isLoading={submitLoading}
-                  startContent={<Trash2 className="w-4 h-4" />}
-                  className="flex-1"
-                >
-                  Force Delete
-                </Button>
-              </>
-            ) : (
-              <Button
-                color="danger"
-                onPress={handleDelete}
-                isLoading={submitLoading}
-                startContent={<Trash2 className="w-4 h-4" />}
-                className="flex-1"
-              >
-                Delete Building
-              </Button>
-            )}
-          </div>
+          <Button
+            variant="flat"
+            onPress={onDeleteClose}
+            isDisabled={mutationLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="danger"
+            onPress={handleDelete}
+            isLoading={mutationLoading}
+            startContent={<Trash2 className="w-4 h-4" />}
+          >
+            Delete Building
+          </Button>
         </ModalFooter>
       </ModalContent>
     </Modal>
   );
 
-  if (loading && buildings.length === 0) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center min-h-96">
-          <div className="text-center space-y-4">
-            <Spinner size="lg" color="primary" />
-            <p className="text-default-500">Loading buildings...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error && buildings.length === 0 && !loading) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardBody className="text-center p-8">
-            <AlertTriangle className="w-16 h-16 text-danger mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-foreground mb-2">
-              Error Loading Buildings
-            </h3>
-            <p className="text-default-500 mb-4">{error}</p>
-            <Button
-              color="primary"
-              onPress={loadBuildings}
-              startContent={<RefreshCw className="w-4 h-4" />}
-              isLoading={loading}
-            >
-              Retry
-            </Button>
-          </CardBody>
-        </Card>
-      </div>
-    );
-  }
-
+  // ✅ LIST VIEW
   if (viewMode === "list") {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+        {/* ✅ Success Message */}
         {successMessage && (
           <Card className="bg-success-50 border-success-200">
             <CardBody className="p-4">
@@ -1160,6 +835,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
           </Card>
         )}
 
+        {/* ✅ Header */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground-600 bg-clip-text text-transparent">
@@ -1182,15 +858,16 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
             </Button>
             <Button
               variant="bordered"
-              onPress={loadBuildings}
+              onPress={refreshBuildings}
               startContent={<RefreshCw className="w-4 h-4" />}
-              isLoading={loading}
+              isLoading={buildingsLoading}
             >
               Refresh
             </Button>
           </div>
         </div>
 
+        {/* ✅ Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
             <CardBody className="p-4">
@@ -1200,7 +877,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 </div>
                 <div>
                   <p className="text-sm text-default-500">Total Buildings</p>
-                  <p className="text-xl font-semibold">{totalCount}</p>
+                  <p className="text-xl font-semibold">{summaryStats.total}</p>
                 </div>
               </div>
             </CardBody>
@@ -1214,9 +891,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 </div>
                 <div>
                   <p className="text-sm text-default-500">Active Buildings</p>
-                  <p className="text-xl font-semibold">
-                    {buildings.filter((b) => b.status === "active").length}
-                  </p>
+                  <p className="text-xl font-semibold">{summaryStats.active}</p>
                 </div>
               </div>
             </CardBody>
@@ -1231,7 +906,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 <div>
                   <p className="text-sm text-default-500">In Maintenance</p>
                   <p className="text-xl font-semibold">
-                    {buildings.filter((b) => b.status === "maintenance").length}
+                    {summaryStats.maintenance}
                   </p>
                 </div>
               </div>
@@ -1247,10 +922,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 <div>
                   <p className="text-sm text-default-500">Total Area</p>
                   <p className="text-xl font-semibold">
-                    {buildings
-                      .reduce((sum, b) => sum + (b.area_sqm || 0), 0)
-                      .toLocaleString()}{" "}
-                    m²
+                    {summaryStats.totalArea.toLocaleString()} m²
                   </p>
                 </div>
               </div>
@@ -1258,6 +930,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
           </Card>
         </div>
 
+        {/* ✅ Filters */}
         <Card>
           <CardBody>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -1268,6 +941,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 startContent={<Search className="w-4 h-4 text-default-400" />}
                 isClearable
                 onClear={() => setSearchQuery("")}
+                variant="bordered"
               />
 
               <Select
@@ -1276,13 +950,12 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 onSelectionChange={(keys) =>
                   setStatusFilter((Array.from(keys)[0] as string) || "all")
                 }
-                aria-label="Filter by building status"
+                variant="bordered"
               >
                 <SelectItem key="all">All Statuses</SelectItem>
                 <SelectItem key="active">Active</SelectItem>
                 <SelectItem key="maintenance">Maintenance</SelectItem>
                 <SelectItem key="inactive">Inactive</SelectItem>
-                <SelectItem key="construction">Construction</SelectItem>
               </Select>
 
               <Select
@@ -1291,7 +964,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 onSelectionChange={(keys) =>
                   setTypeFilter((Array.from(keys)[0] as string) || "all")
                 }
-                aria-label="Filter by building type"
+                variant="bordered"
               >
                 <SelectItem key="all">All Types</SelectItem>
                 <SelectItem key="commercial">Commercial</SelectItem>
@@ -1306,12 +979,12 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 onSelectionChange={(keys) =>
                   setSortBy(Array.from(keys)[0] as string)
                 }
-                aria-label="Sort buildings by field"
+                variant="bordered"
               >
                 <SelectItem key="name">Name</SelectItem>
                 <SelectItem key="code">Code</SelectItem>
-                <SelectItem key="area_sqm">Area</SelectItem>
-                <SelectItem key="created_at">Created Date</SelectItem>
+                <SelectItem key="areaSqm">Area</SelectItem>
+                <SelectItem key="createdAt">Created Date</SelectItem>
               </Select>
 
               <Select
@@ -1320,7 +993,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 onSelectionChange={(keys) =>
                   setSortOrder(Array.from(keys)[0] as "ASC" | "DESC")
                 }
-                aria-label="Sort order direction"
+                variant="bordered"
               >
                 <SelectItem key="ASC">Ascending</SelectItem>
                 <SelectItem key="DESC">Descending</SelectItem>
@@ -1329,15 +1002,25 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
           </CardBody>
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {filteredBuildings.map((building) => (
-            <Card
-              key={building.id}
-              className="hover:shadow-lg transition-all duration-200 hover:scale-[1.02] bg-gradient-to-br from-background to-content1 border border-divider hover:border-primary/30 cursor-pointer"
-            >
-              <div
-                className="flex-1"
-                onClick={() => handleBuildingSelect(building)}
+        {/* ✅ Loading State */}
+        {buildingsLoading && buildings.length === 0 && (
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center space-y-4">
+              <Spinner size="lg" color="primary" />
+              <p className="text-default-500">Loading buildings...</p>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ FIXED: Buildings Grid with proper array handling */}
+        {Array.isArray(buildings) && buildings.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {buildings.map((building) => (
+              <Card
+                key={building.id}
+                className="hover:shadow-lg transition-all duration-200 hover:scale-[1.02] bg-gradient-to-br from-background to-content1 border border-divider hover:border-primary/30"
+                isPressable
+                onPress={() => handleBuildingSelect(building)}
               >
                 <CardHeader className="pb-3">
                   <div className="flex justify-between items-start w-full">
@@ -1351,8 +1034,8 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       {building.status && renderStatusChip(building.status)}
-                      {building.building_type &&
-                        renderTypeChip(building.building_type)}
+                      {building.buildingType &&
+                        renderTypeChip(building.buildingType)}
                     </div>
                   </div>
                 </CardHeader>
@@ -1369,8 +1052,8 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                       <div className="flex items-center gap-2">
                         <MapPin className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.area_sqm
-                            ? `${building.area_sqm.toLocaleString()} m²`
+                          {building.areaSqm
+                            ? `${building.areaSqm.toLocaleString()} m²`
                             : "N/A"}
                         </span>
                       </div>
@@ -1385,151 +1068,144 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                       <div className="flex items-center gap-2">
                         <Wrench className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.equipment_count ||
-                            building.equipment_summary?.total_equipment ||
-                            0}{" "}
-                          equipment
+                          {building.equipmentCount || 0} equipment
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.year_built || "N/A"}
+                          {building.yearBuilt || "N/A"}
                         </span>
                       </div>
                     </div>
 
                     <Divider />
 
+                    {/* ✅ Server-computed metrics */}
                     <div className="space-y-3">
-                      {(building.avg_compliance_score ||
-                        building.compliance_status?.overall_score) && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-default-600 flex items-center gap-2">
-                            <Shield className="w-4 h-4" />
-                            Compliance
-                          </span>
-                          {renderEfficiencyRating(
-                            building.avg_compliance_score ||
-                              building.compliance_status?.overall_score ||
-                              0
-                          )}
-                        </div>
-                      )}
-
-                      {(building.avg_power_factor ||
-                        building.performance_summary
-                          ?.monthly_consumption_kwh) && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-default-600 flex items-center gap-2">
-                            <Zap className="w-4 h-4" />
-                            Power Factor
-                          </span>
-                          <span className="text-sm font-medium">
-                            {safeFormat.number(
-                              building.avg_power_factor || 0.85,
-                              2
+                      {building.avgComplianceScore !== null &&
+                        building.avgComplianceScore !== undefined && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-default-600 flex items-center gap-2">
+                              <Shield className="w-4 h-4" />
+                              Compliance
+                            </span>
+                            {renderEfficiencyRating(
+                              building.avgComplianceScore
                             )}
-                          </span>
-                        </div>
-                      )}
+                          </div>
+                        )}
 
-                      {(building.total_consumption_kwh ||
-                        building.performance_summary
-                          ?.monthly_consumption_kwh) && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-default-600 flex items-center gap-2">
-                            <Activity className="w-4 h-4" />
-                            Monthly kWh
-                          </span>
-                          <span className="text-sm font-medium">
-                            {safeFormat
-                              .getValue(
-                                building.total_consumption_kwh ||
-                                  building.performance_summary
-                                    ?.monthly_consumption_kwh,
-                                0
-                              )
-                              .toLocaleString()}
-                          </span>
-                        </div>
-                      )}
+                      {building.avgPowerFactor !== null &&
+                        building.avgPowerFactor !== undefined && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-default-600 flex items-center gap-2">
+                              <Zap className="w-4 h-4" />
+                              Power Factor
+                            </span>
+                            <span className="text-sm font-medium">
+                              {safeFormat.number(building.avgPowerFactor, 2)}
+                            </span>
+                          </div>
+                        )}
+
+                      {building.totalConsumptionKwh !== null &&
+                        building.totalConsumptionKwh !== undefined && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-default-600 flex items-center gap-2">
+                              <Activity className="w-4 h-4" />
+                              Monthly kWh
+                            </span>
+                            <span className="text-sm font-medium">
+                              {safeFormat
+                                .getValue(building.totalConsumptionKwh, 0)
+                                .toLocaleString()}
+                            </span>
+                          </div>
+                        )}
                     </div>
                   </div>
                 </CardBody>
-              </div>
 
-              <div className="px-6 pb-6">
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    size="sm"
-                    variant="flat"
-                    color="primary"
-                    startContent={<Eye className="w-3 h-3" />}
-                    className="flex-1"
-                    onPress={() => handleBuildingSelect(building)}
-                  >
-                    View Details
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="bordered"
-                    isIconOnly
-                    onPress={() => {
-                      setSelectedBuilding(building);
-                      handleEditOpen();
-                    }}
-                  >
-                    <Edit className="w-3 h-3" />
-                  </Button>
+                {/* ✅ FIXED: Button container with proper event handling */}
+                <div
+                  className="px-6 pb-6"
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color="primary"
+                      startContent={<Eye className="w-3 h-3" />}
+                      className="flex-1"
+                      onPress={() => handleBuildingSelect(building)}
+                    >
+                      View Details
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="bordered"
+                      isIconOnly
+                      onPress={() => {
+                        setSelectedBuildingId(building.id);
+                        handleEditOpen();
+                      }}
+                    >
+                      <Edit className="w-3 h-3" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        {filteredBuildings.length === 0 && !loading && (
-          <Card>
-            <CardBody className="text-center p-12">
-              <Building className="w-16 h-16 text-default-300 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-foreground mb-2">
-                {searchQuery || statusFilter !== "all" || typeFilter !== "all"
-                  ? "No Buildings Found"
-                  : "No Buildings Yet"}
-              </h3>
-              <p className="text-default-500 mb-6">
-                {searchQuery || statusFilter !== "all" || typeFilter !== "all"
-                  ? "Try adjusting your filters to see more results"
-                  : "Get started by adding your first building"}
-              </p>
-              <div className="flex gap-3 justify-center">
-                {searchQuery ||
-                statusFilter !== "all" ||
-                typeFilter !== "all" ? (
-                  <Button
-                    variant="bordered"
-                    onPress={() => {
-                      setSearchQuery("");
-                      setStatusFilter("all");
-                      setTypeFilter("all");
-                    }}
-                  >
-                    Clear Filters
-                  </Button>
-                ) : (
-                  <Button
-                    color="primary"
-                    onPress={handleCreateOpen}
-                    startContent={<Plus className="w-4 h-4" />}
-                  >
-                    Add First Building
-                  </Button>
-                )}
-              </div>
-            </CardBody>
-          </Card>
+              </Card>
+            ))}
+          </div>
         )}
 
+        {/* ✅ FIXED: Empty State with proper array check */}
+        {(!Array.isArray(buildings) || buildings.length === 0) &&
+          !buildingsLoading && (
+            <Card>
+              <CardBody className="text-center p-12">
+                <Building className="w-16 h-16 text-default-300 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-foreground mb-2">
+                  {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                    ? "No Buildings Found"
+                    : "No Buildings Yet"}
+                </h3>
+                <p className="text-default-500 mb-6">
+                  {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                    ? "Try adjusting your filters to see more results"
+                    : "Get started by adding your first building"}
+                </p>
+                <div className="flex gap-3 justify-center">
+                  {searchQuery ||
+                  statusFilter !== "all" ||
+                  typeFilter !== "all" ? (
+                    <Button
+                      variant="bordered"
+                      onPress={() => {
+                        setSearchQuery("");
+                        setStatusFilter("all");
+                        setTypeFilter("all");
+                      }}
+                    >
+                      Clear Filters
+                    </Button>
+                  ) : (
+                    <Button
+                      color="primary"
+                      onPress={handleCreateOpen}
+                      startContent={<Plus className="w-4 h-4" />}
+                    >
+                      Add First Building
+                    </Button>
+                  )}
+                </div>
+              </CardBody>
+            </Card>
+          )}
+
+        {/* ✅ Pagination */}
         {totalPages > 1 && (
           <div className="flex justify-center">
             <Pagination
@@ -1543,22 +1219,17 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
           </div>
         )}
 
-        <BuildingFormModal
-          isOpen={isCreateOpen || isEditOpen}
-          isEdit={isEditOpen}
-          formData={buildingForm}
-          onChange={setBuildingForm}
-          onClose={isEditOpen ? handleEditClose : handleCreateClose}
-          onSubmit={() => handleSubmit(isEditOpen)}
-          isSubmitting={submitLoading}
-        />
-        {isDeleteOpen && <DeleteConfirmationModal />}
+        {/* ✅ Modals */}
+        <BuildingFormModal />
+        <DeleteConfirmationModal />
       </div>
     );
   }
 
+  // ✅ DETAILS VIEW
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      {/* ✅ Success Message */}
       {successMessage && (
         <Card className="bg-success-50 border-success-200">
           <CardBody className="p-4">
@@ -1579,6 +1250,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
         </Card>
       )}
 
+      {/* ✅ Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button
@@ -1594,7 +1266,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
             </h1>
             <p className="text-default-500">
               {selectedBuilding?.code} •{" "}
-              {selectedBuilding?.building_type?.replace("_", " ")}
+              {selectedBuilding?.buildingType?.replace("_", " ")}
             </p>
           </div>
         </div>
@@ -1602,11 +1274,12 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
         <div className="flex items-center gap-3">
           <Button
             variant="bordered"
-            onPress={() =>
-              selectedBuilding && loadBuildingDetails(selectedBuilding)
-            }
+            onPress={() => {
+              refreshBuilding();
+              refreshBuildings();
+            }}
             startContent={<RefreshCw className="w-4 h-4" />}
-            isLoading={detailsLoading}
+            isLoading={buildingLoading}
           >
             Refresh
           </Button>
@@ -1618,7 +1291,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 startContent={<MoreVertical className="w-4 h-4" />}
               />
             </DropdownTrigger>
-            <DropdownMenu aria-label="Building actions">
+            <DropdownMenu>
               <DropdownItem
                 key="edit"
                 startContent={<Edit className="w-4 h-4" />}
@@ -1631,7 +1304,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                 startContent={<Trash2 className="w-4 h-4" />}
                 className="text-danger"
                 color="danger"
-                onPress={handleDeleteOpen}
+                onPress={onDeleteOpen}
               >
                 Delete Building
               </DropdownItem>
@@ -1640,6 +1313,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
         </div>
       </div>
 
+      {/* ✅ FIXED: Summary Cards with proper array handling and error states */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-gradient-to-br from-primary/10 to-primary/5">
           <CardBody className="p-4">
@@ -1650,8 +1324,13 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
               <div>
                 <p className="text-sm text-default-500">Equipment</p>
                 <p className="text-xl font-semibold">
-                  {buildingEquipment.length}
+                  {equipmentIsError
+                    ? "Error"
+                    : Array.isArray(buildingEquipment)
+                      ? buildingEquipment.length
+                      : 0}
                 </p>
+                {equipmentLoading && <Spinner size="sm" />}
               </div>
             </div>
           </CardBody>
@@ -1665,7 +1344,14 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
               </div>
               <div>
                 <p className="text-sm text-default-500">Audits</p>
-                <p className="text-xl font-semibold">{buildingAudits.length}</p>
+                <p className="text-xl font-semibold">
+                  {auditsIsError
+                    ? "Error"
+                    : Array.isArray(buildingAudits)
+                      ? buildingAudits.length
+                      : 0}
+                </p>
+                {auditsLoading && <Spinner size="sm" />}
               </div>
             </div>
           </CardBody>
@@ -1680,8 +1366,14 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
               <div>
                 <p className="text-sm text-default-500">Active Alerts</p>
                 <p className="text-xl font-semibold">
-                  {buildingAlerts.filter((a) => a.status === "active").length}
+                  {alertsIsError
+                    ? "Error"
+                    : Array.isArray(buildingAlerts)
+                      ? buildingAlerts.filter((a) => a.status === "active")
+                          .length
+                      : 0}
                 </p>
+                {alertsLoading && <Spinner size="sm" />}
               </div>
             </div>
           </CardBody>
@@ -1696,17 +1388,18 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
               <div>
                 <p className="text-sm text-default-500">Power Factor</p>
                 <p className="text-xl font-semibold">
-                  {safeFormat.number(
-                    buildingEnergyStats?.average_power_factor,
-                    2
-                  )}
+                  {energyStatsIsError
+                    ? "Error"
+                    : safeFormat.number(energyStats?.powerFactorAvg, 2)}
                 </p>
+                {energyStatsLoading && <Spinner size="sm" />}
               </div>
             </div>
           </CardBody>
         </Card>
       </div>
 
+      {/* ✅ Tabs */}
       <Tabs
         selectedKey={selectedTab}
         onSelectionChange={(key) => setSelectedTab(key as string)}
@@ -1730,202 +1423,217 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
           }
         >
           <div className="mt-6 space-y-6">
-            <Card>
-              <CardHeader>
-                <h3 className="text-lg font-semibold">Building Information</h3>
-              </CardHeader>
-              <CardBody>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">
-                      Building Name
-                    </p>
-                    <p className="font-medium">
-                      {selectedBuilding?.name || "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">
-                      Building Code
-                    </p>
-                    <p className="font-medium">
-                      {selectedBuilding?.code || "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">Status</p>
-                    {selectedBuilding?.status &&
-                      renderStatusChip(selectedBuilding.status)}
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">Area</p>
-                    <p className="font-medium">
-                      {selectedBuilding?.area_sqm
-                        ? `${selectedBuilding.area_sqm.toLocaleString()} m²`
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">Floors</p>
-                    <p className="font-medium">
-                      {selectedBuilding?.floors || "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">Year Built</p>
-                    <p className="font-medium">
-                      {selectedBuilding?.year_built || "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">
-                      Building Type
-                    </p>
-                    {selectedBuilding?.building_type &&
-                      renderTypeChip(selectedBuilding.building_type)}
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">Created</p>
-                    <p className="font-medium">
-                      {selectedBuilding?.created_at
-                        ? new Date(
-                            selectedBuilding.created_at
-                          ).toLocaleDateString()
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-default-500 mb-1">
-                      Last Updated
-                    </p>
-                    <p className="font-medium">
-                      {selectedBuilding?.updated_at
-                        ? new Date(
-                            selectedBuilding.updated_at
-                          ).toLocaleDateString()
-                        : "N/A"}
-                    </p>
-                  </div>
-                </div>
-
-                {selectedBuilding?.description && (
-                  <div className="mt-6">
-                    <p className="text-sm text-default-500 mb-2">Description</p>
-                    <p className="text-default-700">
-                      {selectedBuilding.description}
-                    </p>
-                  </div>
-                )}
-
-                {selectedBuilding?.address && (
-                  <div className="mt-6">
-                    <p className="text-sm text-default-500 mb-2">Address</p>
-                    <p className="text-default-700">
-                      {selectedBuilding.address}
-                    </p>
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-
-            {buildingEnergyStats && (
-              <Card>
-                <CardHeader>
-                  <h3 className="text-lg font-semibold">Performance Summary</h3>
-                </CardHeader>
-                <CardBody>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div>
-                      <p className="text-sm text-default-500 mb-1">
-                        Total Consumption
-                      </p>
-                      <p className="text-2xl font-bold text-primary">
-                        {safeFormat.integer(
-                          buildingEnergyStats.total_consumption
-                        )}{" "}
-                        kWh
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-default-500 mb-1">
-                        Average Consumption
-                      </p>
-                      <p className="text-2xl font-bold text-secondary">
-                        {safeFormat.number(
-                          buildingEnergyStats.average_consumption,
-                          1
-                        )}{" "}
-                        kWh
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-default-500 mb-1">
-                        Peak Demand
-                      </p>
-                      <p className="text-2xl font-bold text-warning">
-                        {safeFormat.number(buildingEnergyStats.peak_demand, 1)}{" "}
-                        kW
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-default-500 mb-1">
-                        Efficiency Score
-                      </p>
-                      <div className="flex items-center gap-3">
-                        <Progress
-                          value={safeFormat.getValue(
-                            buildingEnergyStats.efficiency_score,
-                            0
-                          )}
-                          color={
-                            safeFormat.getValue(
-                              buildingEnergyStats.efficiency_score,
-                              0
-                            ) >= 80
-                              ? "success"
-                              : safeFormat.getValue(
-                                    buildingEnergyStats.efficiency_score,
-                                    0
-                                  ) >= 60
-                                ? "warning"
-                                : "danger"
-                          }
-                          className="flex-1"
-                        />
-                        <span className="font-bold">
-                          {safeFormat.percentage(
-                            buildingEnergyStats.efficiency_score,
-                            0
-                          )}
-                        </span>
+            {detailsLoading ? (
+              <div className="flex justify-center py-12">
+                <Spinner size="lg" color="primary" />
+              </div>
+            ) : (
+              <>
+                {/* ✅ Building Information */}
+                <Card>
+                  <CardHeader>
+                    <h3 className="text-lg font-semibold">
+                      Building Information
+                    </h3>
+                  </CardHeader>
+                  <CardBody>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <div>
+                        <p className="text-sm text-default-500 mb-1">
+                          Building Name
+                        </p>
+                        <p className="font-medium">
+                          {selectedBuilding?.name || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-default-500 mb-1">
+                          Building Code
+                        </p>
+                        <p className="font-medium">
+                          {selectedBuilding?.code || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-default-500 mb-1">Status</p>
+                        {selectedBuilding?.status ? (
+                          renderStatusChip(selectedBuilding.status)
+                        ) : (
+                          <span className="text-default-400">N/A</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm text-default-500 mb-1">Area</p>
+                        <p className="font-medium">
+                          {selectedBuilding?.areaSqm
+                            ? `${selectedBuilding.areaSqm.toLocaleString()} m²`
+                            : "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-default-500 mb-1">Floors</p>
+                        <p className="font-medium">
+                          {selectedBuilding?.floors || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-default-500 mb-1">
+                          Year Built
+                        </p>
+                        <p className="font-medium">
+                          {selectedBuilding?.yearBuilt || "N/A"}
+                        </p>
                       </div>
                     </div>
-                    <div>
-                      <p className="text-sm text-default-500 mb-1">
-                        Power Factor
+
+                    {selectedBuilding?.description && (
+                      <div className="mt-6">
+                        <p className="text-sm text-default-500 mb-2">
+                          Description
+                        </p>
+                        <p className="text-default-700">
+                          {selectedBuilding.description}
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedBuilding?.address && (
+                      <div className="mt-4">
+                        <p className="text-sm text-default-500 mb-2">Address</p>
+                        <p className="text-default-700">
+                          {selectedBuilding.address}
+                        </p>
+                      </div>
+                    )}
+                  </CardBody>
+                </Card>
+
+                {/* ✅ Performance Summary - Only show if data is available */}
+                {energyStats && !energyStatsIsError && (
+                  <Card>
+                    <CardHeader>
+                      <h3 className="text-lg font-semibold">
+                        Performance Summary
+                      </h3>
+                    </CardHeader>
+                    <CardBody>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div>
+                          <p className="text-sm text-default-500 mb-1">
+                            Total Consumption
+                          </p>
+                          <p className="text-2xl font-bold text-primary">
+                            {safeFormat.integer(energyStats.totalConsumption)}{" "}
+                            kWh
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-default-500 mb-1">
+                            Average Consumption
+                          </p>
+                          <p className="text-2xl font-bold text-secondary">
+                            {safeFormat.number(
+                              energyStats.averageConsumption,
+                              1
+                            )}{" "}
+                            kWh
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-default-500 mb-1">
+                            Peak Demand
+                          </p>
+                          <p className="text-2xl font-bold text-warning">
+                            {safeFormat.number(energyStats.peakDemand, 1)} kW
+                          </p>
+                        </div>
+                        {energyStats.efficiencyScore !== null &&
+                          energyStats.efficiencyScore !== undefined && (
+                            <div>
+                              <p className="text-sm text-default-500 mb-1">
+                                Efficiency Score
+                              </p>
+                              <div className="flex items-center gap-3">
+                                <Progress
+                                  value={safeFormat.getValue(
+                                    energyStats.efficiencyScore,
+                                    0
+                                  )}
+                                  color={
+                                    safeFormat.getValue(
+                                      energyStats.efficiencyScore,
+                                      0
+                                    ) >= 80
+                                      ? "success"
+                                      : safeFormat.getValue(
+                                            energyStats.efficiencyScore,
+                                            0
+                                          ) >= 60
+                                        ? "warning"
+                                        : "danger"
+                                  }
+                                  className="flex-1"
+                                />
+                                <span className="font-bold">
+                                  {safeFormat.percentage(
+                                    energyStats.efficiencyScore,
+                                    0
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        <div>
+                          <p className="text-sm text-default-500 mb-1">
+                            Power Factor
+                          </p>
+                          <p className="text-2xl font-bold text-success">
+                            {safeFormat.number(energyStats.powerFactorAvg, 3)}
+                          </p>
+                        </div>
+                        {energyStats.consumptionPerSqm !== null &&
+                          energyStats.consumptionPerSqm !== undefined && (
+                            <div>
+                              <p className="text-sm text-default-500 mb-1">
+                                Consumption per m²
+                              </p>
+                              <p className="text-2xl font-bold text-default-700">
+                                {safeFormat.number(
+                                  energyStats.consumptionPerSqm,
+                                  2
+                                )}{" "}
+                                kWh/m²
+                              </p>
+                            </div>
+                          )}
+                      </div>
+                    </CardBody>
+                  </Card>
+                )}
+
+                {/* ✅ Error states for missing data */}
+                {energyStatsIsError && (
+                  <Card>
+                    <CardBody className="text-center py-8">
+                      <AlertTriangle className="w-12 h-12 text-warning mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">
+                        Energy Data Unavailable
+                      </h3>
+                      <p className="text-default-500 mb-4">
+                        {energyStatsError || "Failed to load energy statistics"}
                       </p>
-                      <p className="text-2xl font-bold text-success">
-                        {safeFormat.number(
-                          buildingEnergyStats.average_power_factor,
-                          3
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-default-500 mb-1">
-                        Consumption per m²
-                      </p>
-                      <p className="text-2xl font-bold text-default-700">
-                        {safeFormat.number(
-                          buildingEnergyStats.consumption_per_sqm,
-                          2
-                        )}{" "}
-                        kWh/m²
-                      </p>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
+                      <Button
+                        variant="bordered"
+                        onPress={refreshBuilding}
+                        startContent={<RefreshCw className="w-4 h-4" />}
+                        isLoading={energyStatsLoading}
+                      >
+                        Retry
+                      </Button>
+                    </CardBody>
+                  </Card>
+                )}
+              </>
             )}
           </div>
         </Tab>
@@ -1936,20 +1644,41 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
             <div className="flex items-center space-x-2">
               <Wrench className="w-4 h-4" />
               <span>Equipment</span>
-              {buildingEquipment.length > 0 && (
-                <Chip size="sm" color="primary" variant="flat">
-                  {buildingEquipment.length}
-                </Chip>
-              )}
+              {Array.isArray(buildingEquipment) &&
+                buildingEquipment.length > 0 && (
+                  <Chip size="sm" color="primary" variant="flat">
+                    {buildingEquipment.length}
+                  </Chip>
+                )}
             </div>
           }
         >
           <div className="mt-6">
-            {detailsLoading ? (
+            {equipmentLoading ? (
               <div className="flex justify-center py-12">
                 <Spinner size="lg" color="primary" />
               </div>
-            ) : buildingEquipment.length > 0 ? (
+            ) : equipmentIsError ? (
+              <Card>
+                <CardBody className="text-center py-12">
+                  <AlertTriangle className="w-16 h-16 text-danger mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">
+                    Error Loading Equipment
+                  </h3>
+                  <p className="text-default-500 mb-4">
+                    {equipmentError || "Failed to load equipment data"}
+                  </p>
+                  <Button
+                    variant="bordered"
+                    onPress={refreshBuilding}
+                    startContent={<RefreshCw className="w-4 h-4" />}
+                  >
+                    Retry
+                  </Button>
+                </CardBody>
+              </Card>
+            ) : Array.isArray(buildingEquipment) &&
+              buildingEquipment.length > 0 ? (
               <Card>
                 <CardBody>
                   <Table aria-label="Equipment table">
@@ -1962,7 +1691,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                       <TableColumn>ACTIONS</TableColumn>
                     </TableHeader>
                     <TableBody>
-                      {buildingEquipment.map((equipment) => (
+                      {buildingEquipment.map((equipment: Equipment) => (
                         <TableRow key={equipment.id}>
                           <TableCell>
                             <div>
@@ -1982,7 +1711,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                               variant="flat"
                               className="capitalize"
                             >
-                              {equipment.equipment_type?.replace("_", " ") ||
+                              {equipment.equipmentType?.replace("_", " ") ||
                                 "Unknown"}
                             </Chip>
                           </TableCell>
@@ -2014,17 +1743,20 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                                   Floor {equipment.floor}
                                 </p>
                               )}
+                              {!equipment.location && !equipment.floor && (
+                                <span className="text-default-400">N/A</span>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>
-                            {equipment.condition_score ? (
+                            {equipment.conditionScore ? (
                               <div className="flex items-center gap-2">
                                 <Progress
-                                  value={equipment.condition_score}
+                                  value={equipment.conditionScore}
                                   color={
-                                    equipment.condition_score >= 80
+                                    equipment.conditionScore >= 80
                                       ? "success"
-                                      : equipment.condition_score >= 60
+                                      : equipment.conditionScore >= 60
                                         ? "warning"
                                         : "danger"
                                   }
@@ -2032,7 +1764,7 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
                                   className="w-16"
                                 />
                                 <span className="text-sm">
-                                  {equipment.condition_score}%
+                                  {equipment.conditionScore}%
                                 </span>
                               </div>
                             ) : (
@@ -2072,17 +1804,9 @@ Recommendation: Set the building status to "Inactive" to safely remove it from a
         </Tab>
       </Tabs>
 
-      <BuildingFormModal
-        isOpen={isCreateOpen || isEditOpen}
-        isEdit={isEditOpen}
-        formData={buildingForm}
-        onChange={setBuildingForm}
-        onClose={isEditOpen ? handleEditClose : handleCreateClose}
-        onSubmit={() => handleSubmit(isEditOpen)}
-        isSubmitting={submitLoading}
-      />
-
-      {isDeleteOpen && <DeleteConfirmationModal />}
+      {/* ✅ Modals */}
+      <BuildingFormModal />
+      <DeleteConfirmationModal />
     </div>
   );
 };

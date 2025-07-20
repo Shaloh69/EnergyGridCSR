@@ -30,6 +30,7 @@ import { Textarea } from "@heroui/input";
 import { Progress } from "@heroui/progress";
 import { Spinner } from "@heroui/spinner";
 import { Tooltip } from "@heroui/tooltip";
+import { Divider } from "@heroui/divider";
 
 // Icons
 import {
@@ -51,272 +52,245 @@ import {
   Filter,
   Download,
   RefreshCw,
-  BarChart3,
   Activity,
   AlertCircle,
   Play,
   CheckSquare,
   XCircle,
-  Pause,
   Settings,
-  Info,
   Award,
   Timer,
-  MapPin,
   Zap,
-  Shield as ShieldCheck,
+  MapPin,
+  BookOpen,
+  CheckCheck,
+  Clock4,
+  AlertOctagon,
+  Workflow,
+  BarChart,
+  TrendingDown,
+  Star,
+  CheckCircle2,
+  XOctagon,
+  Loader,
+  History,
+  FileCheck,
+  Gauge,
+  ClipboardList,
+  Lightbulb,
+  ArrowUpDown,
+  SortAsc,
+  SortDesc,
+  X,
+  Save,
+  Bell,
+  ChevronDown,
+  ChevronUp,
+  MoreHorizontal,
+  Copy,
+  Share,
+  Check,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
-// ✅ PERFECT: Import your new API structure
+// API imports
+import { auditsAPI, buildingsAPI, complianceAPI } from "@/lib/api";
+import { useAuth } from "@/hooks/useApi";
 import {
-  auditsAPI,
-  buildingsAPI,
-  authAPI,
-  dashboardAPI,
-  complianceAPI,
-  apiUtils,
-} from "@/lib/api";
+  safeExtractArrayData,
+  safeExtractObjectData,
+  safeExtractPaginationData,
+  handleApiResponse,
+  handleArrayApiResponse,
+} from "@/lib/api-response-handler";
 
+// Types
 import type {
   Audit,
   Building,
   User,
-  AuditSummary,
-  ComplianceCheck,
-  ComplianceStandard,
-  ApiResponse,
   AuditQueryParams,
-  BuildingQueryParams,
-  ApiError,
-  ValidationError,
+  ComplianceCheck,
+  ApiResponse,
 } from "@/types/api-types";
 
-import {
-  transformToServerFields,
-  extractErrorMessage,
-  formatValidationErrors,
-  normalizeApiResponse,
-} from "@/lib/api-utils";
+// Audit Configuration
+const AUDIT_TYPES = [
+  {
+    value: "comprehensive",
+    label: "Comprehensive Audit",
+    description: "Full facility assessment covering all systems",
+    icon: <BookOpen className="w-4 h-4" />,
+    color: "primary" as const,
+    estimatedDays: "7-14",
+  },
+  {
+    value: "focused",
+    label: "Focused Audit",
+    description: "Targeted assessment of specific systems",
+    icon: <Target className="w-4 h-4" />,
+    color: "secondary" as const,
+    estimatedDays: "3-5",
+  },
+  {
+    value: "compliance",
+    label: "Compliance Audit",
+    description: "Regulatory compliance verification",
+    icon: <CheckCheck className="w-4 h-4" />,
+    color: "success" as const,
+    estimatedDays: "5-7",
+  },
+  {
+    value: "energy_efficiency",
+    label: "Energy Efficiency",
+    description: "Energy performance optimization",
+    icon: <Zap className="w-4 h-4" />,
+    color: "warning" as const,
+    estimatedDays: "4-8",
+  },
+  {
+    value: "safety",
+    label: "Safety Audit",
+    description: "Safety standards verification",
+    icon: <Shield className="w-4 h-4" />,
+    color: "danger" as const,
+    estimatedDays: "2-4",
+  },
+];
 
-// ✅ PERFECT: Enhanced interfaces aligned with your API
-interface EnhancedAudit extends Audit {
-  // Computed fields for UI
-  urgency_status?: "normal" | "urgent" | "critical";
-  days_remaining?: number | null;
-  building_name_display?: string;
-  auditor_name_display?: string;
-  compliance_color?: "success" | "warning" | "danger" | "default";
-  status_color?: "default" | "primary" | "success" | "warning" | "danger";
-  type_icon?: string;
-  progress_display?: string;
-}
+const AUDIT_STATUSES = [
+  {
+    value: "planned",
+    label: "Planned",
+    icon: <Calendar className="w-4 h-4" />,
+    color: "default" as const,
+  },
+  {
+    value: "in_progress",
+    label: "In Progress",
+    icon: <Activity className="w-4 h-4" />,
+    color: "primary" as const,
+  },
+  {
+    value: "completed",
+    label: "Completed",
+    icon: <CheckCircle2 className="w-4 h-4" />,
+    color: "success" as const,
+  },
+  {
+    value: "cancelled",
+    label: "Cancelled",
+    icon: <XOctagon className="w-4 h-4" />,
+    color: "danger" as const,
+  },
+  {
+    value: "on_hold",
+    label: "On Hold",
+    icon: <Clock4 className="w-4 h-4" />,
+    color: "warning" as const,
+  },
+];
 
+const PRIORITIES = [
+  { value: "low", label: "Low", color: "default" as const },
+  { value: "medium", label: "Medium", color: "warning" as const },
+  { value: "high", label: "High", color: "danger" as const },
+  { value: "critical", label: "Critical", color: "danger" as const },
+];
+
+// Form interfaces
 interface AuditFormData {
   title: string;
   description: string;
-  building_id: number | null;
-  audit_type:
+  buildingId: number | null;
+  auditType:
     | "comprehensive"
     | "focused"
     | "compliance"
     | "energy_efficiency"
     | "safety";
-  auditor_id: number | null;
-  planned_start_date: string;
-  planned_end_date: string;
-  estimated_duration_hours: number | null;
+  plannedStartDate: string;
+  plannedEndDate: string;
+  estimatedDurationHours: number;
 }
 
-interface AuditFilters {
-  search: string;
-  building_id: number | null;
-  audit_type:
-    | ""
-    | "comprehensive"
-    | "focused"
-    | "compliance"
-    | "energy_efficiency"
-    | "safety";
-  status:
-    | ""
-    | "planned"
-    | "in_progress"
-    | "completed"
-    | "cancelled"
-    | "on_hold";
-  auditor_id: number | null;
-  date_range_start: string;
-  date_range_end: string;
-}
-
-// ✅ PERFECT: Configuration aligned with your API types
-const AUDIT_CONFIGURATION = {
-  types: [
-    {
-      key: "comprehensive",
-      label: "Comprehensive Audit",
-      icon: "🔍",
-      color: "primary",
-      description: "Complete system evaluation and assessment",
-    },
-    {
-      key: "focused",
-      label: "Focused Audit",
-      icon: "🎯",
-      color: "secondary",
-      description: "Targeted assessment of specific areas",
-    },
-    {
-      key: "compliance",
-      label: "Compliance Audit",
-      icon: "📋",
-      color: "success",
-      description: "Regulatory compliance verification",
-    },
-    {
-      key: "energy_efficiency",
-      label: "Energy Efficiency",
-      icon: "⚡",
-      color: "warning",
-      description: "Energy performance optimization audit",
-    },
-    {
-      key: "safety",
-      label: "Safety Audit",
-      icon: "🛡️",
-      color: "danger",
-      description: "Safety standards and protocols audit",
-    },
-  ] as const,
-
-  statuses: [
-    { key: "planned", label: "Planned", color: "default", icon: Clock },
-    {
-      key: "in_progress",
-      label: "In Progress",
-      color: "primary",
-      icon: Activity,
-    },
-    {
-      key: "completed",
-      label: "Completed",
-      color: "success",
-      icon: CheckCircle,
-    },
-    { key: "cancelled", label: "Cancelled", color: "danger", icon: XCircle },
-    { key: "on_hold", label: "On Hold", color: "warning", icon: Pause },
-  ] as const,
-
-  compliance_standards: [
-    {
-      key: "PEC2017",
-      label: "PEC 2017",
-      description: "Philippine Electrical Code 2017",
-    },
-    {
-      key: "OSHS",
-      label: "OSHS",
-      description: "Occupational Safety & Health Standards",
-    },
-    {
-      key: "ISO25010",
-      label: "ISO 25010",
-      description: "System and Software Quality Models",
-    },
-    {
-      key: "RA11285",
-      label: "RA 11285",
-      description: "Energy Efficiency & Conservation Act",
-    },
-  ] as const,
-
-  priorities: [
-    { key: "low", label: "Low", color: "default" },
-    { key: "medium", label: "Medium", color: "warning" },
-    { key: "high", label: "High", color: "danger" },
-    { key: "critical", label: "Critical", color: "danger" },
-  ] as const,
-} as const;
-
-// ✅ PERFECT: Utility functions using your API patterns
-const enhanceAuditData = (audit: Audit): EnhancedAudit => {
-  const enhanced: EnhancedAudit = { ...audit };
-
-  // Calculate urgency status
-  enhanced.urgency_status = calculateUrgencyStatus(audit);
-  enhanced.days_remaining = calculateDaysRemaining(audit);
-
-  // Display names
-  enhanced.building_name_display =
-    audit.building_name || `Building ${audit.building_id}`;
-  enhanced.auditor_name_display = audit.auditor_name || "Unassigned";
-
-  // UI colors
-  enhanced.compliance_color = getComplianceColor(audit.compliance_score);
-  enhanced.status_color = getStatusColor(audit.status);
-
-  // Type icon
-  const typeConfig = AUDIT_CONFIGURATION.types.find(
-    (t) => t.key === audit.audit_type
-  );
-  enhanced.type_icon = typeConfig?.icon || "📋";
-
-  // Progress display
-  enhanced.progress_display = `${audit.progress_percentage || 0}%`;
-
-  return enhanced;
-};
-
-const calculateUrgencyStatus = (
-  audit: Audit
-): "normal" | "urgent" | "critical" => {
-  if (audit.status === "completed" || audit.status === "cancelled") {
-    return "normal";
+// Safe data extraction helpers
+const safeNumber = (value: any, defaultValue: number = 0): number => {
+  if (value === null || value === undefined) return defaultValue;
+  if (typeof value === "number") return isNaN(value) ? defaultValue : value;
+  if (typeof value === "string") {
+    const parsed = parseFloat(value.trim());
+    return isNaN(parsed) ? defaultValue : parsed;
   }
-
-  const daysRemaining = calculateDaysRemaining(audit);
-  if (daysRemaining === null) return "normal";
-  if (daysRemaining < 0) return "critical"; // Overdue
-  if (daysRemaining <= 3) return "urgent"; // Due soon
-  return "normal";
+  return defaultValue;
 };
 
-const calculateDaysRemaining = (audit: Audit): number | null => {
-  try {
-    const targetDate =
-      audit.status === "planned"
-        ? audit.planned_start_date
-        : audit.planned_end_date;
-
-    if (!targetDate) return null;
-
-    const target = new Date(targetDate);
-    const now = new Date();
-    const diffTime = target.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    return diffDays;
-  } catch {
-    return null;
-  }
+const safeString = (value: any, defaultValue: string = ""): string => {
+  if (value === null || value === undefined) return defaultValue;
+  if (typeof value === "string") return value;
+  return String(value);
 };
 
-const getComplianceColor = (
-  score?: number
-): "success" | "warning" | "danger" | "default" => {
-  if (!score) return "default";
-  if (score >= 90) return "success";
-  if (score >= 70) return "warning";
-  return "danger";
+// Type guard for audit type
+const isValidAuditType = (
+  value: any
+): value is
+  | "comprehensive"
+  | "focused"
+  | "compliance"
+  | "energy_efficiency"
+  | "safety" => {
+  return [
+    "comprehensive",
+    "focused",
+    "compliance",
+    "energy_efficiency",
+    "safety",
+  ].includes(value);
 };
 
-const getStatusColor = (
-  status: string
-): "default" | "primary" | "success" | "warning" | "danger" => {
-  const config = AUDIT_CONFIGURATION.statuses.find((s) => s.key === status);
-  return config?.color || "default";
+// Type guard for audit status
+const isValidAuditStatus = (
+  value: any
+): value is
+  | "planned"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "on_hold" => {
+  return [
+    "planned",
+    "in_progress",
+    "completed",
+    "cancelled",
+    "on_hold",
+  ].includes(value);
 };
 
+// ✅ FIXED: Utility function to clean query parameters
+const cleanQueryParams = (params: AuditQueryParams): AuditQueryParams => {
+  const cleaned: AuditQueryParams = {};
+
+  // Only include non-empty, defined values
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      // Special handling for search - don't include if empty string
+      if (
+        key === "search" &&
+        typeof value === "string" &&
+        value.trim() === ""
+      ) {
+        return;
+      }
+      (cleaned as any)[key] = value;
+    }
+  });
+
+  return cleaned;
+};
+
+// Utility functions
 const formatDate = (dateString?: string): string => {
   if (!dateString) return "Not set";
   try {
@@ -345,41 +319,79 @@ const formatDateTime = (dateString?: string): string => {
   }
 };
 
-export default function EnhancedAuditsPage() {
-  // ✅ PERFECT: State management with proper typing
-  const [audits, setAudits] = useState<EnhancedAudit[]>([]);
+const getTypeConfig = (type: string) => {
+  return AUDIT_TYPES.find((t) => t.value === type) || AUDIT_TYPES[0];
+};
+
+const getStatusConfig = (status: string) => {
+  return AUDIT_STATUSES.find((s) => s.value === status) || AUDIT_STATUSES[0];
+};
+
+const getComplianceGrade = (
+  score?: number | null
+): { grade: string; color: string } => {
+  if (score === null || score === undefined) {
+    return { grade: "N/A", color: "default" };
+  }
+
+  const numScore = safeNumber(score, 0);
+  if (numScore >= 95) return { grade: "A+", color: "success" };
+  if (numScore >= 90) return { grade: "A", color: "success" };
+  if (numScore >= 85) return { grade: "B+", color: "primary" };
+  if (numScore >= 80) return { grade: "B", color: "primary" };
+  if (numScore >= 75) return { grade: "C+", color: "warning" };
+  if (numScore >= 70) return { grade: "C", color: "warning" };
+  if (numScore >= 60) return { grade: "D", color: "danger" };
+  return { grade: "F", color: "danger" };
+};
+
+export default function AuditsManagementPage() {
+  const { user, isAuthenticated } = useAuth();
+
+  // State
+  const [audits, setAudits] = useState<Audit[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
-
-  // Loading and error states
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [actionLoading, setActionLoading] = useState<Record<number, boolean>>(
-    {}
-  );
+  const [error, setError] = useState<string | null>(null);
+  const [selectedAudit, setSelectedAudit] = useState<Audit | null>(null);
+  const [complianceData, setComplianceData] = useState<ComplianceCheck[]>([]);
 
-  // ✅ PERFECT: Pagination state matching your API structure
+  // Pagination state
   const [pagination, setPagination] = useState({
-    current_page: 1,
-    per_page: 20,
-    total_pages: 1,
-    total_count: 0,
-    has_next_page: false,
-    has_prev_page: false,
+    currentPage: 1,
+    totalPages: 1,
+    totalCount: 0,
+    perPage: 20,
+    hasNextPage: false,
+    hasPrevPage: false,
   });
 
-  // ✅ PERFECT: Filters with proper typing
-  const [filters, setFilters] = useState<AuditFilters>({
-    search: "",
-    building_id: null,
-    audit_type: "",
-    status: "",
-    auditor_id: null,
-    date_range_start: "",
-    date_range_end: "",
+  // ✅ FIXED: Filter state with proper initialization
+  const [filters, setFilters] = useState<AuditQueryParams>({
+    page: 1,
+    limit: 20,
+    sortBy: "createdAt",
+    sortOrder: "DESC",
   });
+
+  // Internal search state to prevent immediate API calls
+  const [searchValue, setSearchValue] = useState("");
+
+  // Form state
+  const [formData, setFormData] = useState<AuditFormData>({
+    title: "",
+    description: "",
+    buildingId: null,
+    auditType: "comprehensive",
+    plannedStartDate: "",
+    plannedEndDate: "",
+    estimatedDurationHours: 8,
+  });
+
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   // Modal states
   const {
@@ -403,731 +415,524 @@ export default function EnhancedAuditsPage() {
     onClose: onDeleteClose,
   } = useDisclosure();
 
-  // Selected audit and related data
-  const [selectedAudit, setSelectedAudit] = useState<EnhancedAudit | null>(
-    null
-  );
-  const [complianceChecks, setComplianceChecks] = useState<ComplianceCheck[]>(
-    []
-  );
-  const [complianceStandards, setComplianceStandards] = useState<
-    ComplianceStandard[]
-  >([]);
-  const [loadingCompliance, setLoadingCompliance] = useState(false);
-
-  // Form state with validation
-  const [formData, setFormData] = useState<AuditFormData>({
-    title: "",
-    description: "",
-    building_id: null,
-    audit_type: "comprehensive",
-    auditor_id: null,
-    planned_start_date: "",
-    planned_end_date: "",
-    estimated_duration_hours: null,
-  });
-
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
-
-  // ✅ PERFECT: API functions using your established patterns
-  const loadAudits = useCallback(
-    async (showLoading = false): Promise<void> => {
+  // ✅ FIXED: API Functions with proper error handling and parameter cleaning
+  const fetchAudits = useCallback(
+    async (showSpinner = false) => {
       try {
-        if (showLoading) setLoading(true);
-
-        console.log("🎯 Loading audits with filters:", filters);
-
-        // ✅ Build query parameters using your API structure
-        const queryParams: AuditQueryParams = {
-          page: pagination.current_page,
-          limit: pagination.per_page,
-          sortBy: "created_at",
-          sortOrder: "DESC",
-        };
-
-        // Apply filters with proper field transformation
-        if (filters.search.trim()) {
-          queryParams.search = filters.search.trim();
-        }
-        if (filters.building_id) {
-          queryParams.building_id = filters.building_id;
-        }
-        if (filters.audit_type) {
-          queryParams.audit_type = filters.audit_type;
-        }
-        if (filters.status) {
-          queryParams.status = filters.status;
-        }
-        if (filters.auditor_id) {
-          queryParams.auditor_id = filters.auditor_id;
-        }
-        if (filters.date_range_start) {
-          queryParams.start_date_from = filters.date_range_start;
-        }
-        if (filters.date_range_end) {
-          queryParams.start_date_to = filters.date_range_end;
-        }
-
-        const response = await auditsAPI.getAll(queryParams);
-
-        if (response.data?.success) {
-          const auditsData = Array.isArray(response.data.data)
-            ? response.data.data
-            : [];
-          const enhancedAudits = auditsData.map(enhanceAuditData);
-
-          setAudits(enhancedAudits);
-
-          if (response.data.pagination) {
-            setPagination(response.data.pagination);
-          }
-
-          console.log(`✅ Loaded ${enhancedAudits.length} audits`);
-          setError(null);
-        } else {
-          throw new Error(response.data?.message || "Failed to load audits");
-        }
-      } catch (err: any) {
-        console.error("❌ Failed to load audits:", err);
-        const errorMessage = extractErrorMessage(err);
-        setError(errorMessage);
-
-        if (audits.length === 0) {
-          setAudits([]);
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filters, pagination.current_page, pagination.per_page, audits.length]
-  );
-
-  const loadBuildings = useCallback(async (): Promise<void> => {
-    try {
-      console.log("🏢 Loading buildings...");
-
-      const queryParams: BuildingQueryParams = {
-        status: "active",
-        sortBy: "name",
-        sortOrder: "ASC",
-        limit: 100,
-      };
-
-      const response = await buildingsAPI.getAll(queryParams);
-
-      if (response.data?.success) {
-        const buildingsData = Array.isArray(response.data.data)
-          ? response.data.data
-          : [];
-        setBuildings(buildingsData);
-        console.log(`✅ Loaded ${buildingsData.length} buildings`);
-      } else {
-        console.warn(
-          "⚠️ Buildings response not successful:",
-          response.data?.message
-        );
-        setBuildings([]);
-      }
-    } catch (err: any) {
-      console.warn("⚠️ Failed to load buildings:", extractErrorMessage(err));
-      setBuildings([]);
-    }
-  }, []);
-
-  const loadUsers = useCallback(async (): Promise<void> => {
-    try {
-      console.log("👥 Loading users...");
-
-      // Try to get users list
-      try {
-        const response = await authAPI.getUsers();
-
-        if (response.data?.success) {
-          const usersData = Array.isArray(response.data.data)
-            ? response.data.data
-            : [];
-          // Filter users who can be auditors
-          const auditors = usersData.filter((user) =>
-            ["admin", "energy_manager", "facility_engineer"].includes(user.role)
-          );
-          setUsers(auditors);
-          console.log(`✅ Loaded ${auditors.length} potential auditors`);
-          return;
-        }
-      } catch (usersError) {
-        console.warn("⚠️ Users endpoint not available, trying profile...");
-      }
-
-      // Fallback to current user profile
-      try {
-        const profileResponse = await authAPI.getProfile();
-
-        if (profileResponse.data?.success) {
-          const userData = profileResponse.data.data;
-          const currentUser = userData?.user || userData;
-
-          if (currentUser) {
-            setUsers([currentUser]);
-            console.log("✅ Using current user profile");
-            return;
-          }
-        }
-      } catch (profileError) {
-        console.warn(
-          "⚠️ Profile endpoint failed:",
-          extractErrorMessage(profileError)
-        );
-      }
-
-      // Last resort: use mock data if available
-      setUsers([]);
-      console.warn("⚠️ No user data available");
-    } catch (err: any) {
-      console.error("❌ Failed to load users:", extractErrorMessage(err));
-      setUsers([]);
-    }
-  }, []);
-
-  const loadAuditSummary = useCallback(async (): Promise<void> => {
-    try {
-      console.log("📊 Loading audit summary...");
-      const response = await auditsAPI.getSummary();
-
-      if (response.data?.success) {
-        setAuditSummary(response.data.data);
-        console.log("✅ Audit summary loaded");
-      } else {
-        setAuditSummary(null);
-        console.warn("⚠️ Audit summary not available");
-      }
-    } catch (err: any) {
-      console.warn(
-        "⚠️ Failed to load audit summary:",
-        extractErrorMessage(err)
-      );
-      setAuditSummary(null);
-    }
-  }, []);
-
-  const loadComplianceData = useCallback(
-    async (auditId: number): Promise<void> => {
-      try {
-        setLoadingCompliance(true);
-        console.log(`🔍 Loading compliance data for audit ${auditId}...`);
-
-        // Load compliance checks
-        try {
-          const checksResponse = await complianceAPI.getAuditChecks(auditId);
-
-          if (checksResponse.data?.success) {
-            const checks = Array.isArray(checksResponse.data.data)
-              ? checksResponse.data.data
-              : checksResponse.data.data?.checks || [];
-            setComplianceChecks(checks);
-            console.log(`✅ Loaded ${checks.length} compliance checks`);
-          } else {
-            setComplianceChecks([]);
-          }
-        } catch (checksError) {
-          console.warn(
-            "⚠️ Failed to load compliance checks:",
-            extractErrorMessage(checksError)
-          );
-          setComplianceChecks([]);
-        }
-
-        // Load compliance standards
-        try {
-          const standardsResponse = await complianceAPI.getStandards();
-
-          if (standardsResponse.data?.success) {
-            const standards = Array.isArray(standardsResponse.data.data)
-              ? standardsResponse.data.data
-              : [];
-            setComplianceStandards(standards);
-            console.log(`✅ Loaded ${standards.length} compliance standards`);
-          } else {
-            setComplianceStandards([]);
-          }
-        } catch (standardsError) {
-          console.warn(
-            "⚠️ Failed to load compliance standards:",
-            extractErrorMessage(standardsError)
-          );
-          setComplianceStandards([]);
-        }
-      } catch (err: any) {
-        console.error(
-          "❌ Failed to load compliance data:",
-          extractErrorMessage(err)
-        );
-        setComplianceChecks([]);
-        setComplianceStandards([]);
-      } finally {
-        setLoadingCompliance(false);
-      }
-    },
-    []
-  );
-
-  // ✅ PERFECT: Comprehensive data loading with proper error handling
-  const loadAllData = useCallback(
-    async (showRefreshing = false): Promise<void> => {
-      try {
-        if (showRefreshing) {
+        if (showSpinner) {
           setRefreshing(true);
         } else {
           setLoading(true);
         }
         setError(null);
 
-        console.log("🚀 Starting comprehensive data load...");
+        // ✅ Clean the parameters before sending
+        const cleanedFilters = cleanQueryParams(filters);
+        console.log("📡 Fetching audits with cleaned filters:", cleanedFilters);
 
-        // Load supporting data in parallel
-        const supportingDataPromises = [
-          loadBuildings(),
-          loadUsers(),
-          loadAuditSummary(),
-        ];
+        const response = await auditsAPI.getAll(cleanedFilters);
+        console.log("📥 Raw audits response:", response);
 
-        await Promise.allSettled(supportingDataPromises);
+        const result = handleArrayApiResponse<Audit>(response);
+        console.log("🔍 Processed audits result:", result);
 
-        // Load main audits data
-        await loadAudits(false);
+        if (result.success) {
+          const auditData = result.data || [];
+          const paginationData = result.pagination;
 
-        console.log("✅ All data loaded successfully");
+          setAudits(auditData);
+
+          // Handle pagination data
+          if (paginationData) {
+            setPagination({
+              currentPage: safeNumber(paginationData.currentPage, 1),
+              totalPages: safeNumber(paginationData.totalPages, 1),
+              totalCount: safeNumber(paginationData.totalCount, 0),
+              perPage: safeNumber(paginationData.perPage, 20),
+              hasNextPage: Boolean(paginationData.hasNextPage),
+              hasPrevPage: Boolean(paginationData.hasPrevPage),
+            });
+          } else {
+            // Fallback pagination
+            setPagination({
+              currentPage: 1,
+              totalPages: 1,
+              totalCount: auditData.length,
+              perPage: 20,
+              hasNextPage: false,
+              hasPrevPage: false,
+            });
+          }
+
+          console.log("✅ Audits loaded successfully:", {
+            count: auditData.length,
+            pagination: paginationData,
+          });
+        } else {
+          const errorMessage = result.error || "Failed to fetch audits";
+          setError(errorMessage);
+          setAudits([]);
+          console.error("❌ Failed to fetch audits:", errorMessage);
+        }
       } catch (err: any) {
-        console.error("❌ Critical error during data loading:", err);
-        const errorMessage = extractErrorMessage(err);
+        const errorMessage = err.message || "Failed to fetch audits";
+        console.error("💥 Error fetching audits:", err);
         setError(errorMessage);
+        setAudits([]);
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [loadBuildings, loadUsers, loadAuditSummary, loadAudits]
+    [filters]
   );
 
-  // ✅ PERFECT: Form validation with API compliance
+  const fetchBuildings = useCallback(async () => {
+    try {
+      console.log("📡 Fetching buildings...");
+
+      const response = await buildingsAPI.getAll({
+        status: "active",
+        sortBy: "name",
+        sortOrder: "ASC",
+        limit: 100, // Get enough buildings for dropdown
+      });
+
+      console.log("📥 Raw buildings response:", response);
+
+      const result = handleArrayApiResponse<Building>(response);
+      console.log("🔍 Processed buildings result:", result);
+
+      if (result.success) {
+        const buildingData = result.data || [];
+        setBuildings(buildingData);
+        console.log("✅ Buildings loaded successfully:", buildingData.length);
+      } else {
+        console.error("❌ Failed to fetch buildings:", result.error);
+        setBuildings([]);
+      }
+    } catch (err: any) {
+      console.error("💥 Error fetching buildings:", err);
+      setBuildings([]);
+    }
+  }, []);
+
+  const fetchAuditDetails = useCallback(async (auditId: number) => {
+    try {
+      console.log("📡 Fetching audit details for ID:", auditId);
+
+      const response = await auditsAPI.getById(auditId);
+      console.log("📥 Raw audit details response:", response);
+
+      const result = handleApiResponse<Audit>(response);
+      console.log("🔍 Processed audit details result:", result);
+
+      if (result.success && result.data) {
+        setSelectedAudit(result.data);
+
+        // Fetch compliance data if audit is completed or in progress
+        if (["completed", "in_progress"].includes(result.data.status)) {
+          try {
+            console.log("📡 Fetching compliance data for audit:", auditId);
+
+            const complianceResponse =
+              await complianceAPI.getComplianceChecksByAudit(auditId);
+            console.log("📥 Raw compliance response:", complianceResponse);
+
+            const complianceResult =
+              handleArrayApiResponse<ComplianceCheck>(complianceResponse);
+            console.log("🔍 Processed compliance result:", complianceResult);
+
+            if (complianceResult.success) {
+              setComplianceData(complianceResult.data || []);
+              console.log(
+                "✅ Compliance data loaded:",
+                complianceResult.data?.length || 0
+              );
+            } else {
+              console.error(
+                "❌ Failed to fetch compliance data:",
+                complianceResult.error
+              );
+              setComplianceData([]);
+            }
+          } catch (complianceErr) {
+            console.error("💥 Error fetching compliance data:", complianceErr);
+            setComplianceData([]);
+          }
+        } else {
+          setComplianceData([]);
+        }
+
+        console.log("✅ Audit details loaded successfully");
+      } else {
+        console.error("❌ Failed to fetch audit details:", result.error);
+      }
+    } catch (err: any) {
+      console.error("💥 Error fetching audit details:", err);
+    }
+  }, []);
+
+  // Manual refresh function
+  const handleRefresh = useCallback(() => {
+    console.log("🔄 Manual refresh triggered");
+    fetchAudits(true);
+  }, [fetchAudits]);
+
+  // Form validation
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
-    // Title validation (matching your API requirements)
-    if (!formData.title?.trim()) {
-      errors.title = "Audit title is required";
-    } else if (formData.title.length < 5 || formData.title.length > 200) {
-      errors.title = "Title must be between 5 and 200 characters";
+    if (!formData.title.trim()) {
+      errors.title = "Title is required";
+    } else if (formData.title.length < 5) {
+      errors.title = "Title must be at least 5 characters";
     }
 
-    // Building validation
-    if (!formData.building_id) {
-      errors.building_id = "Building selection is required";
+    if (!formData.buildingId) {
+      errors.buildingId = "Building is required";
     }
 
-    // Auditor validation (optional if no users available)
-    if (users.length > 0 && !formData.auditor_id) {
-      errors.auditor_id = "Auditor assignment is required";
+    if (!formData.plannedStartDate) {
+      errors.plannedStartDate = "Planned start date is required";
+    } else if (new Date(formData.plannedStartDate) < new Date()) {
+      errors.plannedStartDate = "Planned start date cannot be in the past";
     }
 
-    // Date validation
-    if (!formData.planned_start_date) {
-      errors.planned_start_date = "Planned start date is required";
-    }
-
-    if (!formData.planned_end_date) {
-      errors.planned_end_date = "Planned end date is required";
-    }
-
-    // Cross-date validation
-    if (formData.planned_start_date && formData.planned_end_date) {
-      const startDate = new Date(formData.planned_start_date);
-      const endDate = new Date(formData.planned_end_date);
-
-      if (startDate >= endDate) {
-        errors.planned_end_date = "End date must be after start date";
-      }
-
-      // Check if start date is too far in the past (for new audits)
-      if (!selectedAudit) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (startDate < today) {
-          errors.planned_start_date = "Start date cannot be in the past";
-        }
+    if (formData.plannedEndDate && formData.plannedStartDate) {
+      if (
+        new Date(formData.plannedEndDate) <= new Date(formData.plannedStartDate)
+      ) {
+        errors.plannedEndDate = "End date must be after start date";
       }
     }
 
-    // Duration validation
-    if (formData.estimated_duration_hours !== null) {
-      const duration = formData.estimated_duration_hours;
-      if (duration <= 0 || duration > 8760) {
-        // Max 1 year
-        errors.estimated_duration_hours =
-          "Duration must be between 1 and 8760 hours";
-      }
+    if (formData.estimatedDurationHours < 1) {
+      errors.estimatedDurationHours = "Duration must be at least 1 hour";
     }
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // ✅ PERFECT: CRUD operations with proper error handling
-  const handleCreateAudit = async (): Promise<void> => {
-    if (!validateForm()) return;
+  // ✅ FIXED: Event handlers with proper parameter handling
+  const handleFilterChange = (key: keyof AuditQueryParams, value: any) => {
+    console.log("🔧 Filter changed:", key, value);
 
-    try {
-      setSubmitting(true);
-      console.log("🔄 Creating new audit...");
+    setFilters((prev) => {
+      const newFilters = { ...prev };
 
-      const auditData: Partial<Audit> = {
-        title: formData.title.trim(),
-        description: formData.description.trim() || undefined,
-        building_id: formData.building_id!,
-        audit_type: formData.audit_type,
-        auditor_id: formData.auditor_id || undefined,
-        planned_start_date: formData.planned_start_date,
-        planned_end_date: formData.planned_end_date,
-        estimated_duration_hours:
-          formData.estimated_duration_hours || undefined,
-      };
-
-      const response = await auditsAPI.create(auditData);
-
-      if (response.data?.success) {
-        console.log("✅ Audit created successfully");
-        await loadAllData(true);
-        onCreateClose();
-        resetForm();
-        setError(null);
+      // Handle different filter types properly
+      if (value === undefined || value === null || value === "") {
+        // Remove the filter completely
+        delete newFilters[key];
       } else {
-        throw new Error(response.data?.message || "Failed to create audit");
+        newFilters[key] = value;
       }
-    } catch (err: any) {
-      console.error("❌ Failed to create audit:", err);
-      const errorMessage = extractErrorMessage(err);
-      setError(errorMessage);
 
-      // Handle validation errors
-      if (err?.response?.data?.validation_errors) {
-        const validationErrors: Record<string, string> = {};
-        err.response.data.validation_errors.forEach(
-          (error: ValidationError) => {
-            validationErrors[error.field] = error.message;
-          }
-        );
-        setFormErrors(validationErrors);
+      // Reset to page 1 when filters change (except for page changes)
+      if (key !== "page") {
+        newFilters.page = 1;
       }
-    } finally {
-      setSubmitting(false);
+
+      return newFilters;
+    });
+  };
+
+  // ✅ FIXED: Search handler with debouncing
+  const handleSearchChange = (value: string) => {
+    setSearchValue(value);
+
+    // Clear the search filter if empty, otherwise set it
+    if (value.trim() === "") {
+      handleFilterChange("search", undefined);
+    } else {
+      // Debounce the search
+      const timeoutId = setTimeout(() => {
+        handleFilterChange("search", value.trim());
+      }, 500);
+
+      return () => clearTimeout(timeoutId);
     }
   };
 
-  const handleUpdateAudit = async (): Promise<void> => {
-    if (!selectedAudit || !validateForm()) return;
+  const handleCreateAudit = async () => {
+    if (!validateForm()) return;
 
+    setIsSubmitting(true);
     try {
-      setSubmitting(true);
-      console.log("🔄 Updating audit...");
-
       const auditData: Partial<Audit> = {
         title: formData.title.trim(),
         description: formData.description.trim() || undefined,
-        building_id: formData.building_id!,
-        audit_type: formData.audit_type,
-        auditor_id: formData.auditor_id || undefined,
-        planned_start_date: formData.planned_start_date,
-        planned_end_date: formData.planned_end_date,
-        estimated_duration_hours:
-          formData.estimated_duration_hours || undefined,
+        buildingId: formData.buildingId!,
+        auditType: formData.auditType,
+        auditorId: user?.id,
+        plannedStartDate: formData.plannedStartDate,
+        plannedEndDate: formData.plannedEndDate || undefined,
+        estimatedDurationHours: formData.estimatedDurationHours,
       };
 
-      const response = await auditsAPI.update(selectedAudit.id, auditData);
+      console.log("📤 Creating audit with data:", auditData);
 
-      if (response.data?.success) {
+      const response = await auditsAPI.create(auditData);
+      console.log("📥 Create audit response:", response);
+
+      const result = handleApiResponse<Audit>(response);
+      console.log("🔍 Processed create result:", result);
+
+      if (result.success) {
+        console.log("✅ Audit created successfully");
+        onCreateClose();
+        resetForm();
+        fetchAudits(true); // Refresh the list
+      } else {
+        const errorMessage = result.error || "Failed to create audit";
+        setFormErrors({ general: errorMessage });
+        console.error("❌ Failed to create audit:", errorMessage);
+      }
+    } catch (err: any) {
+      const errorMessage = err.message || "Failed to create audit";
+      setFormErrors({ general: errorMessage });
+      console.error("💥 Error creating audit:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdateAudit = async () => {
+    if (!selectedAudit || !validateForm()) return;
+
+    setIsSubmitting(true);
+    try {
+      const updateData: Partial<Audit> = {
+        title: formData.title.trim(),
+        description: formData.description.trim() || undefined,
+        auditType: formData.auditType,
+        plannedStartDate: formData.plannedStartDate,
+        plannedEndDate: formData.plannedEndDate || undefined,
+        estimatedDurationHours: formData.estimatedDurationHours,
+      };
+
+      console.log("📤 Updating audit with data:", updateData);
+
+      const response = await auditsAPI.update(selectedAudit.id, updateData);
+      console.log("📥 Update audit response:", response);
+
+      const result = handleApiResponse<Audit>(response);
+      console.log("🔍 Processed update result:", result);
+
+      if (result.success) {
         console.log("✅ Audit updated successfully");
-        await loadAllData(true);
         onEditClose();
         resetForm();
         setSelectedAudit(null);
-        setError(null);
+        fetchAudits(true); // Refresh the list
       } else {
-        throw new Error(response.data?.message || "Failed to update audit");
+        const errorMessage = result.error || "Failed to update audit";
+        setFormErrors({ general: errorMessage });
+        console.error("❌ Failed to update audit:", errorMessage);
       }
     } catch (err: any) {
-      console.error("❌ Failed to update audit:", err);
-      const errorMessage = extractErrorMessage(err);
-      setError(errorMessage);
-
-      // Handle validation errors
-      if (err?.response?.data?.validation_errors) {
-        const validationErrors: Record<string, string> = {};
-        err.response.data.validation_errors.forEach(
-          (error: ValidationError) => {
-            validationErrors[error.field] = error.message;
-          }
-        );
-        setFormErrors(validationErrors);
-      }
+      const errorMessage = err.message || "Failed to update audit";
+      setFormErrors({ general: errorMessage });
+      console.error("💥 Error updating audit:", err);
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
-  const handleDeleteAudit = async (): Promise<void> => {
+  const handleDeleteAudit = async () => {
     if (!selectedAudit) return;
 
+    setIsSubmitting(true);
     try {
-      setSubmitting(true);
-      console.log(`🗑️ Deleting audit ${selectedAudit.id}...`);
+      console.log("📤 Deleting audit:", selectedAudit.id);
 
       const response = await auditsAPI.delete(selectedAudit.id);
+      console.log("📥 Delete audit response:", response);
 
-      if (response.data?.success) {
+      const result = handleApiResponse<void>(response);
+      console.log("🔍 Processed delete result:", result);
+
+      if (result.success) {
         console.log("✅ Audit deleted successfully");
-        await loadAllData(true);
         onDeleteClose();
         setSelectedAudit(null);
-        setError(null);
+        fetchAudits(true); // Refresh the list
       } else {
-        throw new Error(response.data?.message || "Failed to delete audit");
+        console.error("❌ Failed to delete audit:", result.error);
       }
     } catch (err: any) {
-      console.error("❌ Failed to delete audit:", err);
-      const errorMessage = extractErrorMessage(err);
-      setError(errorMessage);
+      console.error("💥 Error deleting audit:", err);
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
-  // ✅ PERFECT: Audit action handlers
-  const handleAuditAction = async (
-    audit: EnhancedAudit,
-    action: "start" | "complete"
-  ): Promise<void> => {
+  const handleStatusChange = async (audit: Audit, newStatus: string) => {
     try {
-      setActionLoading((prev) => ({ ...prev, [audit.id]: true }));
-      console.log(`🎬 ${action}ing audit ${audit.id}...`);
-
-      let response;
-      if (action === "start") {
-        response = await auditsAPI.start(audit.id);
-      } else {
-        response = await auditsAPI.complete(audit.id);
+      if (!isValidAuditStatus(newStatus)) {
+        console.error("❌ Invalid audit status:", newStatus);
+        return;
       }
 
-      if (response.data?.success) {
-        console.log(`✅ Audit ${action}ed successfully`);
-        await loadAllData(true);
-        setError(null);
+      const updateData: Partial<Audit> = { status: newStatus };
+
+      if (newStatus === "in_progress") {
+        updateData.actualStartDate = new Date().toISOString();
+      } else if (newStatus === "completed") {
+        updateData.actualEndDate = new Date().toISOString();
+      }
+
+      console.log("📤 Updating audit status:", audit.id, newStatus);
+
+      const response = await auditsAPI.update(audit.id, updateData);
+      console.log("📥 Status update response:", response);
+
+      const result = handleApiResponse<Audit>(response);
+      console.log("🔍 Processed status update result:", result);
+
+      if (result.success) {
+        console.log("✅ Audit status updated successfully");
+        fetchAudits(true); // Refresh the list
       } else {
-        throw new Error(response.data?.message || `Failed to ${action} audit`);
+        console.error("❌ Failed to update audit status:", result.error);
       }
     } catch (err: any) {
-      console.error(`❌ Failed to ${action} audit:`, err);
-      const errorMessage = extractErrorMessage(err);
-      setError(errorMessage);
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [audit.id]: false }));
+      console.error("💥 Error updating audit status:", err);
     }
   };
 
-  // ✅ PERFECT: Modal handlers
-  const openCreateModal = (): void => {
-    resetForm();
-    setError(null);
-    onCreateOpen();
-  };
-
-  const openEditModal = (audit: EnhancedAudit): void => {
-    setSelectedAudit(audit);
-    setFormData({
-      title: audit.title,
-      description: audit.description || "",
-      building_id: audit.building_id,
-      audit_type: audit.audit_type,
-      auditor_id: audit.auditor_id,
-      planned_start_date: audit.planned_start_date
-        ? audit.planned_start_date.split("T")[0]
-        : "",
-      planned_end_date: audit.planned_end_date
-        ? audit.planned_end_date.split("T")[0]
-        : "",
-      estimated_duration_hours: audit.estimated_duration_hours || null,
-    });
-    setFormErrors({});
-    setError(null);
-    onEditOpen();
-  };
-
-  const openViewModal = async (audit: EnhancedAudit): Promise<void> => {
-    setSelectedAudit(audit);
-    setComplianceChecks([]);
-    setComplianceStandards([]);
-    onViewOpen();
-
-    // Load compliance data for completed or in-progress audits
-    if (audit.status === "completed" || audit.status === "in_progress") {
-      await loadComplianceData(audit.id);
-    }
-  };
-
-  const openDeleteModal = (audit: EnhancedAudit): void => {
-    setSelectedAudit(audit);
-    setError(null);
-    onDeleteOpen();
-  };
-
-  const resetForm = (): void => {
+  const resetForm = () => {
     setFormData({
       title: "",
       description: "",
-      building_id: null,
-      audit_type: "comprehensive",
-      auditor_id: null,
-      planned_start_date: "",
-      planned_end_date: "",
-      estimated_duration_hours: null,
+      buildingId: null,
+      auditType: "comprehensive",
+      plannedStartDate: "",
+      plannedEndDate: "",
+      estimatedDurationHours: 8,
     });
     setFormErrors({});
-    setSelectedAudit(null);
   };
 
-  // ✅ PERFECT: Filter handlers
-  const handleFilterChange = (key: keyof AuditFilters, value: any): void => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-    // Reset pagination when filters change
-    setPagination((prev) => ({ ...prev, current_page: 1 }));
+  const openCreateModal = () => {
+    resetForm();
+    onCreateOpen();
   };
 
-  const clearAllFilters = (): void => {
-    setFilters({
-      search: "",
-      building_id: null,
-      audit_type: "",
-      status: "",
-      auditor_id: null,
-      date_range_start: "",
-      date_range_end: "",
+  const openEditModal = (audit: Audit) => {
+    setSelectedAudit(audit);
+
+    // Safely extract audit type with fallback
+    const auditType = isValidAuditType(audit.auditType)
+      ? audit.auditType
+      : "comprehensive";
+
+    setFormData({
+      title: safeString(audit.title),
+      description: safeString(audit.description),
+      buildingId: audit.buildingId,
+      auditType: auditType,
+      plannedStartDate: audit.plannedStartDate?.split("T")[0] || "",
+      plannedEndDate: audit.plannedEndDate?.split("T")[0] || "",
+      estimatedDurationHours: safeNumber(audit.estimatedDurationHours, 8),
     });
-    setPagination((prev) => ({ ...prev, current_page: 1 }));
+    setFormErrors({});
+    onEditOpen();
   };
 
-  // ✅ PERFECT: Computed values and memoized data
-  const auditStatistics = useMemo(() => {
+  const openViewModal = (audit: Audit) => {
+    setSelectedAudit(audit);
+    setComplianceData([]);
+    fetchAuditDetails(audit.id);
+    onViewOpen();
+  };
+
+  const openDeleteModal = (audit: Audit) => {
+    setSelectedAudit(audit);
+    onDeleteOpen();
+  };
+
+  // Effects
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log("🚀 Component mounted, fetching initial data");
+      fetchBuildings();
+    }
+  }, [isAuthenticated, fetchBuildings]);
+
+  useEffect(() => {
+    if (isAuthenticated && buildings.length > 0) {
+      console.log("🚀 Buildings loaded, fetching audits");
+      fetchAudits();
+    }
+  }, [isAuthenticated, buildings.length, fetchAudits]);
+
+  // Computed values
+  const buildingOptions = useMemo(() => {
+    return buildings.map((building) => ({
+      value: building.id,
+      label: `${safeString(building.name)}${building.code ? ` (${building.code})` : ""}`,
+      building,
+    }));
+  }, [buildings]);
+
+  const auditStats = useMemo(() => {
     const stats = {
       total: audits.length,
       planned: 0,
-      in_progress: 0,
+      inProgress: 0,
       completed: 0,
       cancelled: 0,
-      on_hold: 0,
-      overdue: 0,
-      due_soon: 0,
-      avg_compliance_score: 0,
-      avg_progress: 0,
+      onHold: 0,
+      avgCompliance: 0,
     };
 
-    if (audits.length === 0) return stats;
+    let complianceSum = 0;
+    let complianceCount = 0;
 
-    // Count by status
     audits.forEach((audit) => {
-      stats[audit.status as keyof typeof stats]++;
+      switch (audit.status) {
+        case "planned":
+          stats.planned++;
+          break;
+        case "in_progress":
+          stats.inProgress++;
+          break;
+        case "completed":
+          stats.completed++;
+          break;
+        case "cancelled":
+          stats.cancelled++;
+          break;
+        case "on_hold":
+          stats.onHold++;
+          break;
+      }
 
-      // Count urgency
-      if (audit.urgency_status === "critical") stats.overdue++;
-      if (audit.urgency_status === "urgent") stats.due_soon++;
+      if (audit.complianceScore != null) {
+        complianceSum += safeNumber(audit.complianceScore);
+        complianceCount++;
+      }
     });
 
-    // Calculate averages
-    const auditsWithCompliance = audits.filter(
-      (a) =>
-        a.compliance_score !== null &&
-        a.compliance_score !== undefined &&
-        !isNaN(a.compliance_score)
-    );
-
-    if (auditsWithCompliance.length > 0) {
-      stats.avg_compliance_score =
-        auditsWithCompliance.reduce(
-          (sum, a) => sum + (a.compliance_score || 0),
-          0
-        ) / auditsWithCompliance.length;
-    }
-
-    const auditsWithProgress = audits.filter(
-      (a) =>
-        a.progress_percentage !== null &&
-        a.progress_percentage !== undefined &&
-        !isNaN(a.progress_percentage)
-    );
-
-    if (auditsWithProgress.length > 0) {
-      stats.avg_progress =
-        auditsWithProgress.reduce(
-          (sum, a) => sum + (a.progress_percentage || 0),
-          0
-        ) / auditsWithProgress.length;
-    }
-
+    stats.avgCompliance =
+      complianceCount > 0 ? complianceSum / complianceCount : 0;
     return stats;
   }, [audits]);
-
-  const buildingSelectOptions = useMemo(
-    () =>
-      buildings.map((building) => ({
-        key: building.id.toString(),
-        label: building.name + (building.code ? ` (${building.code})` : ""),
-        value: building.id,
-      })),
-    [buildings]
-  );
-
-  const userSelectOptions = useMemo(
-    () =>
-      users.map((user) => ({
-        key: user.id.toString(),
-        label: `${user.first_name} ${user.last_name} (${user.role})`,
-        value: user.id,
-      })),
-    [users]
-  );
 
   const hasActiveFilters = useMemo(() => {
     return !!(
       filters.search ||
-      filters.building_id ||
-      filters.audit_type ||
+      filters.buildingId ||
+      filters.auditType ||
       filters.status ||
-      filters.auditor_id ||
-      filters.date_range_start ||
-      filters.date_range_end
+      filters.auditorId
     );
   }, [filters]);
 
-  // ✅ PERFECT: Effect hooks with proper dependencies
-  useEffect(() => {
-    loadAllData();
-  }, [loadAllData]);
-
-  useEffect(() => {
-    if (!loading) {
-      loadAudits();
-    }
-  }, [filters, pagination.current_page]);
-
-  // ✅ PERFECT: Helper functions for UI
-  const getTypeConfig = (type: string) =>
-    AUDIT_CONFIGURATION.types.find((t) => t.key === type) ||
-    AUDIT_CONFIGURATION.types[0];
-
-  const getStatusConfig = (status: string) =>
-    AUDIT_CONFIGURATION.statuses.find((s) => s.key === status) ||
-    AUDIT_CONFIGURATION.statuses[0];
-
-  // ✅ PERFECT: Loading state
+  // Loading state
   if (loading && audits.length === 0) {
     return (
       <div className="space-y-6">
@@ -1135,29 +940,18 @@ export default function EnhancedAuditsPage() {
           <Skeleton className="h-10 w-80 rounded-lg" />
           <Skeleton className="h-10 w-32 rounded-lg" />
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i}>
-              <CardBody>
-                <Skeleton className="h-20 rounded-lg" />
-              </CardBody>
-            </Card>
-          ))}
-        </div>
-
-        <Card>
-          <CardBody className="space-y-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 rounded-lg" />
-            ))}
-          </CardBody>
-        </Card>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i}>
+            <CardBody>
+              <Skeleton className="h-20 rounded-lg" />
+            </CardBody>
+          </Card>
+        ))}
       </div>
     );
   }
 
-  // ✅ PERFECT: Error state
+  // Error state
   if (error && audits.length === 0) {
     return (
       <div className="space-y-6">
@@ -1169,9 +963,10 @@ export default function EnhancedAuditsPage() {
           <Button
             color="primary"
             startContent={<RefreshCw className="w-4 h-4" />}
-            onPress={() => loadAllData()}
+            onPress={handleRefresh}
+            isLoading={refreshing}
           >
-            Retry
+            {refreshing ? "Retrying..." : "Retry"}
           </Button>
         </div>
 
@@ -1182,24 +977,14 @@ export default function EnhancedAuditsPage() {
               Failed to Load Audits
             </h3>
             <p className="text-default-500 mb-4 max-w-md mx-auto">{error}</p>
-            <div className="flex gap-2 justify-center">
-              <Button
-                color="primary"
-                onPress={() => loadAllData()}
-                startContent={<RefreshCw className="w-4 h-4" />}
-              >
-                Try Again
-              </Button>
-              <Button
-                variant="light"
-                onPress={() => {
-                  setError(null);
-                  setAudits([]);
-                }}
-              >
-                Dismiss
-              </Button>
-            </div>
+            <Button
+              color="primary"
+              onPress={handleRefresh}
+              startContent={<RefreshCw className="w-4 h-4" />}
+              isLoading={refreshing}
+            >
+              {refreshing ? "Retrying..." : "Try Again"}
+            </Button>
           </CardBody>
         </Card>
       </div>
@@ -1208,28 +993,24 @@ export default function EnhancedAuditsPage() {
 
   return (
     <div className="space-y-6">
-      {/* ✅ PERFECT: Header with proper styling */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground flex items-center">
             <Shield className="w-8 h-8 mr-3 text-primary" />
             Audits Management
           </h1>
-          <p className="text-default-500 mt-1 max-w-2xl">
+          <p className="text-default-500 mt-1">
             Comprehensive audit scheduling, tracking, and compliance management
-            system
           </p>
-          {auditStatistics.total > 0 && (
-            <p className="text-sm text-default-400 mt-1">
-              {auditStatistics.total} total audits •{" "}
-              {auditStatistics.in_progress} in progress •
-              {auditStatistics.overdue > 0 && (
-                <span className="text-danger font-medium">
-                  {" "}
-                  {auditStatistics.overdue} overdue
-                </span>
-              )}
-            </p>
+          {auditStats.total > 0 && (
+            <div className="flex items-center gap-4 mt-2 text-sm text-default-400">
+              <span>{auditStats.total} total audits</span>
+              <span>•</span>
+              <span>{auditStats.inProgress} in progress</span>
+              <span>•</span>
+              <span>{auditStats.completed} completed</span>
+            </div>
           )}
         </div>
 
@@ -1243,7 +1024,7 @@ export default function EnhancedAuditsPage() {
                 <RefreshCw className="w-4 h-4" />
               )
             }
-            onPress={() => loadAllData(true)}
+            onPress={handleRefresh}
             isDisabled={refreshing}
           >
             {refreshing ? "Refreshing..." : "Refresh"}
@@ -1252,108 +1033,49 @@ export default function EnhancedAuditsPage() {
             color="primary"
             startContent={<Plus className="w-4 h-4" />}
             onPress={openCreateModal}
-            isDisabled={buildings.length === 0}
+            isDisabled={buildingOptions.length === 0}
           >
-            Schedule Audit
+            Create Audit
           </Button>
         </div>
       </div>
 
-      {/* ✅ PERFECT: System status alerts */}
-      {!loading && (
-        <>
-          {buildings.length === 0 && (
-            <Card className="border-l-4 border-l-warning bg-warning-50">
-              <CardBody className="p-4">
-                <div className="flex items-center gap-3 text-warning-800">
-                  <AlertTriangle className="w-5 h-5" />
-                  <div>
-                    <div className="font-medium">No Buildings Available</div>
-                    <div className="text-sm text-warning-700 mt-1">
-                      Add buildings before scheduling audits. Contact system
-                      administrator if this persists.
-                    </div>
-                  </div>
-                </div>
-              </CardBody>
-            </Card>
-          )}
-
-          {users.length === 0 && (
-            <Card className="border-l-4 border-l-warning bg-warning-50">
-              <CardBody className="p-4">
-                <div className="flex items-center gap-3 text-warning-800">
-                  <Info className="w-5 h-5" />
-                  <div>
-                    <div className="font-medium">Limited User Data</div>
-                    <div className="text-sm text-warning-700 mt-1">
-                      Audits can be created without auditor assignment. User
-                      data will be loaded when available.
-                    </div>
-                  </div>
-                </div>
-              </CardBody>
-            </Card>
-          )}
-
-          {error && audits.length > 0 && (
-            <Card className="border-l-4 border-l-danger bg-danger-50">
-              <CardBody className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 text-danger-800">
-                    <AlertCircle className="w-5 h-5" />
-                    <div>
-                      <div className="font-medium">Partial Data Load</div>
-                      <div className="text-sm text-danger-700 mt-1">
-                        {error}
-                      </div>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="light"
-                    color="danger"
-                    onPress={() => setError(null)}
-                  >
-                    Dismiss
-                  </Button>
-                </div>
-              </CardBody>
-            </Card>
-          )}
-        </>
-      )}
-
-      {/* ✅ PERFECT: Enhanced statistics dashboard */}
+      {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-        <Card className="border-l-4 border-l-foreground">
-          <CardBody className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-default-600">Total Audits</p>
-                <p className="text-2xl font-bold">{auditStatistics.total}</p>
-                <p className="text-xs text-default-400">
-                  {auditStatistics.completed} completed
-                </p>
-              </div>
-              <Shield className="w-8 h-8 text-default-400" />
-            </div>
-          </CardBody>
-        </Card>
-
         <Card className="border-l-4 border-l-primary">
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
               <div>
+                <p className="text-sm text-default-600">Total Audits</p>
+                <p className="text-2xl font-bold">{auditStats.total}</p>
+              </div>
+              <Shield className="w-8 h-8 text-primary" />
+            </div>
+          </CardBody>
+        </Card>
+
+        <Card className="border-l-4 border-l-default">
+          <CardBody className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-default-600">Planned</p>
+                <p className="text-2xl font-bold">{auditStats.planned}</p>
+              </div>
+              <Calendar className="w-8 h-8 text-default-400" />
+            </div>
+          </CardBody>
+        </Card>
+
+        <Card className="border-l-4 border-l-warning">
+          <CardBody className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
                 <p className="text-sm text-default-600">In Progress</p>
-                <p className="text-2xl font-bold text-primary">
-                  {auditStatistics.in_progress}
-                </p>
-                <p className="text-xs text-default-400">
-                  {auditStatistics.planned} planned
+                <p className="text-2xl font-bold text-warning">
+                  {auditStats.inProgress}
                 </p>
               </div>
-              <Activity className="w-8 h-8 text-primary" />
+              <Activity className="w-8 h-8 text-warning" />
             </div>
           </CardBody>
         </Card>
@@ -1364,13 +1086,13 @@ export default function EnhancedAuditsPage() {
               <div>
                 <p className="text-sm text-default-600">Completed</p>
                 <p className="text-2xl font-bold text-success">
-                  {auditStatistics.completed}
+                  {auditStats.completed}
                 </p>
                 <Progress
                   value={
-                    (auditStatistics.completed /
-                      Math.max(auditStatistics.total, 1)) *
-                    100
+                    auditStats.total > 0
+                      ? (auditStats.completed / auditStats.total) * 100
+                      : 0
                   }
                   color="success"
                   size="sm"
@@ -1386,20 +1108,13 @@ export default function EnhancedAuditsPage() {
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-default-600">Avg. Compliance</p>
+                <p className="text-sm text-default-600">Avg Compliance</p>
                 <p className="text-2xl font-bold">
-                  {auditStatistics.avg_compliance_score.toFixed(1)}%
+                  {auditStats.avgCompliance.toFixed(1)}%
                 </p>
-                <Progress
-                  value={auditStatistics.avg_compliance_score}
-                  color={
-                    getComplianceColor(
-                      auditStatistics.avg_compliance_score
-                    ) as any
-                  }
-                  size="sm"
-                  className="mt-1"
-                />
+                <div className="text-lg font-medium mt-1">
+                  {getComplianceGrade(auditStats.avgCompliance).grade}
+                </div>
               </div>
               <Target className="w-8 h-8 text-secondary" />
             </div>
@@ -1410,41 +1125,21 @@ export default function EnhancedAuditsPage() {
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-default-600">Critical/Overdue</p>
+                <p className="text-sm text-default-600">Issues</p>
                 <p className="text-2xl font-bold text-danger">
-                  {auditStatistics.overdue}
+                  {auditStats.cancelled + auditStats.onHold}
                 </p>
                 <p className="text-xs text-default-400">
-                  {auditStatistics.due_soon} due soon
+                  {auditStats.onHold} on hold
                 </p>
               </div>
               <AlertTriangle className="w-8 h-8 text-danger" />
             </div>
           </CardBody>
         </Card>
-
-        <Card className="border-l-4 border-l-warning">
-          <CardBody className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-default-600">Avg. Progress</p>
-                <p className="text-2xl font-bold text-warning">
-                  {auditStatistics.avg_progress.toFixed(0)}%
-                </p>
-                <Progress
-                  value={auditStatistics.avg_progress}
-                  color="warning"
-                  size="sm"
-                  className="mt-1"
-                />
-              </div>
-              <Timer className="w-8 h-8 text-warning" />
-            </div>
-          </CardBody>
-        </Card>
       </div>
 
-      {/* ✅ PERFECT: Enhanced filters section */}
+      {/* Filters */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
@@ -1452,150 +1147,139 @@ export default function EnhancedAuditsPage() {
             <h3 className="text-lg font-semibold">Filters</h3>
             {hasActiveFilters && (
               <Chip size="sm" color="primary" variant="flat">
-                {Object.values(filters).filter(Boolean).length} active
+                Active
               </Chip>
             )}
           </div>
-          {hasActiveFilters && (
-            <Button
-              size="sm"
-              variant="light"
-              color="danger"
-              onPress={clearAllFilters}
-            >
-              Clear All
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="light"
+            isIconOnly
+            onPress={() => setShowFilters(!showFilters)}
+          >
+            {showFilters ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
         </CardHeader>
-        <CardBody>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-            <div className="md:col-span-2">
-              <Input
-                placeholder="Search audits by title, description..."
-                value={filters.search}
-                onChange={(e) => handleFilterChange("search", e.target.value)}
-                startContent={<Search className="w-4 h-4 text-default-400" />}
-                isClearable
-                onClear={() => handleFilterChange("search", "")}
-              />
+
+        {showFilters && (
+          <CardBody>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="md:col-span-2">
+                <Input
+                  placeholder="Search audits..."
+                  value={searchValue}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  startContent={<Search className="w-4 h-4 text-default-400" />}
+                  isClearable
+                  onClear={() => {
+                    setSearchValue("");
+                    handleFilterChange("search", undefined);
+                  }}
+                />
+              </div>
+
+              <Select
+                placeholder="All Buildings"
+                selectedKeys={
+                  filters.buildingId
+                    ? new Set([filters.buildingId.toString()])
+                    : new Set()
+                }
+                onSelectionChange={(keys) => {
+                  const selectedKey = Array.from(keys)[0] as string;
+                  handleFilterChange(
+                    "buildingId",
+                    selectedKey ? parseInt(selectedKey) : undefined
+                  );
+                }}
+                startContent={
+                  <BuildingIcon className="w-4 h-4 text-default-400" />
+                }
+              >
+                {buildingOptions.map((option) => (
+                  <SelectItem key={option.value}>{option.label}</SelectItem>
+                ))}
+              </Select>
+
+              <Select
+                placeholder="All Types"
+                selectedKeys={
+                  filters.auditType ? new Set([filters.auditType]) : new Set()
+                }
+                onSelectionChange={(keys) => {
+                  const selectedKey = Array.from(keys)[0] as
+                    | "comprehensive"
+                    | "focused"
+                    | "compliance"
+                    | "energy_efficiency"
+                    | "safety"
+                    | undefined;
+                  handleFilterChange("auditType", selectedKey);
+                }}
+                startContent={<FileText className="w-4 h-4 text-default-400" />}
+              >
+                {AUDIT_TYPES.map((type) => (
+                  <SelectItem key={type.value} startContent={type.icon}>
+                    {type.label}
+                  </SelectItem>
+                ))}
+              </Select>
+
+              <Select
+                placeholder="All Statuses"
+                selectedKeys={
+                  filters.status ? new Set([filters.status]) : new Set()
+                }
+                onSelectionChange={(keys) => {
+                  const selectedKey = Array.from(keys)[0] as string;
+                  handleFilterChange("status", selectedKey);
+                }}
+                startContent={<Activity className="w-4 h-4 text-default-400" />}
+              >
+                {AUDIT_STATUSES.map((status) => (
+                  <SelectItem key={status.value} startContent={status.icon}>
+                    {status.label}
+                  </SelectItem>
+                ))}
+              </Select>
+
+              {hasActiveFilters && (
+                <div className="flex items-center">
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    color="danger"
+                    startContent={<X className="w-4 h-4" />}
+                    onPress={() => {
+                      setFilters({
+                        page: 1,
+                        limit: 20,
+                        sortBy: "createdAt",
+                        sortOrder: "DESC",
+                      });
+                      setSearchValue("");
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                </div>
+              )}
             </div>
-
-            <Select
-              placeholder="All Buildings"
-              selectedKeys={
-                filters.building_id
-                  ? new Set([filters.building_id.toString()])
-                  : new Set()
-              }
-              onSelectionChange={(keys) => {
-                const selectedKey = Array.from(keys)[0] as string;
-                handleFilterChange(
-                  "building_id",
-                  selectedKey ? parseInt(selectedKey) : null
-                );
-              }}
-              isDisabled={buildingSelectOptions.length === 0}
-              startContent={
-                <BuildingIcon className="w-4 h-4 text-default-400" />
-              }
-            >
-              {buildingSelectOptions.map((option) => (
-                <SelectItem key={option.key}>{option.label}</SelectItem>
-              ))}
-            </Select>
-
-            <Select
-              placeholder="All Types"
-              selectedKeys={
-                filters.audit_type ? new Set([filters.audit_type]) : new Set()
-              }
-              onSelectionChange={(keys) => {
-                const selectedKey = Array.from(keys)[0] as string;
-                handleFilterChange("audit_type", selectedKey || "");
-              }}
-              startContent={<Settings className="w-4 h-4 text-default-400" />}
-            >
-              {AUDIT_CONFIGURATION.types.map((type) => (
-                <SelectItem key={type.key} startContent={type.icon}>
-                  {type.label}
-                </SelectItem>
-              ))}
-            </Select>
-
-            <Select
-              placeholder="All Statuses"
-              selectedKeys={
-                filters.status ? new Set([filters.status]) : new Set()
-              }
-              onSelectionChange={(keys) => {
-                const selectedKey = Array.from(keys)[0] as string;
-                handleFilterChange("status", selectedKey || "");
-              }}
-              startContent={<Activity className="w-4 h-4 text-default-400" />}
-            >
-              {AUDIT_CONFIGURATION.statuses.map((status) => (
-                <SelectItem
-                  key={status.key}
-                  startContent={<status.icon className="w-4 h-4" />}
-                >
-                  {status.label}
-                </SelectItem>
-              ))}
-            </Select>
-
-            <Select
-              placeholder="All Auditors"
-              selectedKeys={
-                filters.auditor_id
-                  ? new Set([filters.auditor_id.toString()])
-                  : new Set()
-              }
-              onSelectionChange={(keys) => {
-                const selectedKey = Array.from(keys)[0] as string;
-                handleFilterChange(
-                  "auditor_id",
-                  selectedKey ? parseInt(selectedKey) : null
-                );
-              }}
-              isDisabled={userSelectOptions.length === 0}
-              startContent={<UserIcon className="w-4 h-4 text-default-400" />}
-            >
-              {userSelectOptions.map((option) => (
-                <SelectItem key={option.key}>{option.label}</SelectItem>
-              ))}
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <Input
-              label="Start Date From"
-              type="date"
-              value={filters.date_range_start}
-              onChange={(e) =>
-                handleFilterChange("date_range_start", e.target.value)
-              }
-              startContent={<Calendar className="w-4 h-4 text-default-400" />}
-            />
-            <Input
-              label="Start Date To"
-              type="date"
-              value={filters.date_range_end}
-              onChange={(e) =>
-                handleFilterChange("date_range_end", e.target.value)
-              }
-              startContent={<Calendar className="w-4 h-4 text-default-400" />}
-            />
-          </div>
-        </CardBody>
+          </CardBody>
+        )}
       </Card>
 
-      {/* ✅ PERFECT: Enhanced audits table */}
+      {/* Audits Table */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary" />
             <h3 className="text-lg font-semibold">
-              Audits ({pagination.total_count || audits.length})
+              Audits ({pagination.totalCount})
             </h3>
           </div>
           <div className="flex gap-2">
@@ -1608,88 +1292,55 @@ export default function EnhancedAuditsPage() {
             </Button>
           </div>
         </CardHeader>
+
         <CardBody className="p-0">
           <Table
-            aria-label="Audits management table"
-            selectionMode="none"
-            classNames={{
-              wrapper: "min-h-[400px]",
-            }}
+            aria-label="Audits table"
+            classNames={{ wrapper: "min-h-[500px]" }}
           >
             <TableHeader>
               <TableColumn>AUDIT DETAILS</TableColumn>
               <TableColumn>BUILDING & TEAM</TableColumn>
               <TableColumn>TYPE & STATUS</TableColumn>
-              <TableColumn>SCHEDULE & TIMELINE</TableColumn>
-              <TableColumn>PROGRESS & COMPLIANCE</TableColumn>
+              <TableColumn>SCHEDULE</TableColumn>
+              <TableColumn>PROGRESS</TableColumn>
               <TableColumn>ACTIONS</TableColumn>
             </TableHeader>
+
             <TableBody
-              emptyContent="No audits found. Create your first audit to get started."
               isLoading={loading}
               loadingContent={<Spinner label="Loading audits..." />}
+              emptyContent={
+                hasActiveFilters
+                  ? "No audits match your current filters."
+                  : "No audits found. Create your first audit to get started."
+              }
             >
               {audits.map((audit) => {
-                const typeConfig = getTypeConfig(audit.audit_type);
+                const typeConfig = getTypeConfig(audit.auditType);
                 const statusConfig = getStatusConfig(audit.status);
-                const isActionLoading = actionLoading[audit.id];
+                const complianceGrade = getComplianceGrade(
+                  audit.complianceScore
+                );
 
                 return (
                   <TableRow key={audit.id}>
                     <TableCell>
                       <div className="space-y-2">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="font-semibold text-foreground line-clamp-2">
-                              {audit.title}
-                            </div>
-                            <div className="text-sm text-default-500">
-                              ID: {audit.id}
-                            </div>
-                          </div>
-                          {audit.urgency_status &&
-                            audit.urgency_status !== "normal" && (
-                              <Tooltip
-                                content={
-                                  audit.urgency_status === "critical"
-                                    ? "Audit is overdue"
-                                    : "Audit due soon"
-                                }
-                              >
-                                <Chip
-                                  size="sm"
-                                  color={
-                                    audit.urgency_status === "critical"
-                                      ? "danger"
-                                      : "warning"
-                                  }
-                                  variant="flat"
-                                  className="shrink-0"
-                                >
-                                  {audit.urgency_status === "critical"
-                                    ? "Overdue"
-                                    : "Due Soon"}
-                                </Chip>
-                              </Tooltip>
-                            )}
+                        <div className="font-semibold text-foreground line-clamp-2">
+                          {safeString(audit.title)}
                         </div>
-
+                        <div className="text-sm text-default-500">
+                          ID: {audit.id}
+                        </div>
                         {audit.description && (
                           <p className="text-xs text-default-400 line-clamp-2">
-                            {audit.description}
+                            {safeString(audit.description)}
                           </p>
                         )}
-
-                        {audit.days_remaining !== null &&
-                          audit.days_remaining !== undefined && (
-                            <div className="text-xs text-default-500">
-                              {audit.days_remaining > 0
-                                ? `${audit.days_remaining} days remaining`
-                                : audit.days_remaining === 0
-                                  ? "Due today"
-                                  : `${Math.abs(audit.days_remaining)} days overdue`}
-                            </div>
-                          )}
+                        <div className="text-xs text-default-500">
+                          Created: {formatDate(audit.createdAt)}
+                        </div>
                       </div>
                     </TableCell>
 
@@ -1699,10 +1350,11 @@ export default function EnhancedAuditsPage() {
                           <BuildingIcon className="w-4 h-4 text-default-400 shrink-0" />
                           <div>
                             <div className="text-sm font-medium line-clamp-1">
-                              {audit.building_name_display}
+                              {safeString(audit.buildingName) ||
+                                `Building ${audit.buildingId}`}
                             </div>
                             <div className="text-xs text-default-500">
-                              Building ID: {audit.building_id}
+                              ID: {audit.buildingId}
                             </div>
                           </div>
                         </div>
@@ -1711,13 +1363,8 @@ export default function EnhancedAuditsPage() {
                           <UserIcon className="w-4 h-4 text-default-400 shrink-0" />
                           <div>
                             <div className="text-sm line-clamp-1">
-                              {audit.auditor_name_display}
+                              {safeString(audit.auditorName) || "Unassigned"}
                             </div>
-                            {audit.auditor_id && (
-                              <div className="text-xs text-default-500">
-                                Auditor ID: {audit.auditor_id}
-                              </div>
-                            )}
                           </div>
                         </div>
                       </div>
@@ -1727,7 +1374,7 @@ export default function EnhancedAuditsPage() {
                       <div className="space-y-2">
                         <Chip
                           size="sm"
-                          color={typeConfig.color as any}
+                          color={typeConfig.color}
                           variant="flat"
                           startContent={typeConfig.icon}
                         >
@@ -1736,11 +1383,9 @@ export default function EnhancedAuditsPage() {
 
                         <Chip
                           size="sm"
-                          color={statusConfig.color as any}
+                          color={statusConfig.color}
                           variant="solid"
-                          startContent={
-                            <statusConfig.icon className="w-3 h-3" />
-                          }
+                          startContent={statusConfig.icon}
                         >
                           {statusConfig.label}
                         </Chip>
@@ -1748,82 +1393,92 @@ export default function EnhancedAuditsPage() {
                     </TableCell>
 
                     <TableCell>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3 text-primary" />
-                          <span className="text-xs">
-                            {formatDate(audit.planned_start_date)} -{" "}
-                            {formatDate(audit.planned_end_date)}
-                          </span>
+                      <div className="space-y-2">
+                        <div className="text-sm">
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-primary" />
+                            <span className="text-xs">
+                              {formatDate(audit.plannedStartDate)}
+                            </span>
+                          </div>
                         </div>
 
-                        {audit.actual_start_date && (
+                        {audit.actualStartDate && (
                           <div className="text-xs text-success">
-                            Started: {formatDate(audit.actual_start_date)}
+                            Started: {formatDate(audit.actualStartDate)}
                           </div>
                         )}
 
-                        {audit.actual_end_date && (
+                        {audit.actualEndDate && (
                           <div className="text-xs text-success">
-                            Completed: {formatDate(audit.actual_end_date)}
+                            Completed: {formatDate(audit.actualEndDate)}
                           </div>
                         )}
 
-                        {audit.estimated_duration_hours && (
-                          <div className="text-xs text-default-500 flex items-center gap-1">
-                            <Timer className="w-3 h-3" />
-                            {audit.estimated_duration_hours}h estimated
+                        {audit.estimatedDurationHours && (
+                          <div className="text-xs text-default-400">
+                            Est: {safeNumber(audit.estimatedDurationHours)}h
                           </div>
                         )}
-
-                        <div className="text-xs text-default-400">
-                          Created: {formatDate(audit.created_at)}
-                        </div>
                       </div>
                     </TableCell>
 
                     <TableCell>
                       <div className="space-y-3">
-                        {/* Progress */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-default-600">
-                              Progress
-                            </span>
-                            <span className="text-xs font-medium">
-                              {audit.progress_percentage || 0}%
-                            </span>
-                          </div>
-                          <Progress
-                            value={audit.progress_percentage || 0}
-                            color="primary"
-                            size="sm"
-                          />
-                        </div>
-
-                        {/* Compliance */}
-                        {audit.compliance_score !== null &&
-                        audit.compliance_score !== undefined ? (
+                        {audit.complianceScore !== null &&
+                        audit.complianceScore !== undefined ? (
                           <div>
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-xs text-default-600">
                                 Compliance
                               </span>
-                              <span className="text-xs font-medium">
-                                {audit.compliance_score.toFixed(1)}%
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs font-medium">
+                                  {safeNumber(audit.complianceScore).toFixed(1)}
+                                  %
+                                </span>
+                                <Chip
+                                  size="sm"
+                                  variant="flat"
+                                  color={complianceGrade.color as any}
+                                >
+                                  {complianceGrade.grade}
+                                </Chip>
+                              </div>
                             </div>
                             <Progress
-                              value={audit.compliance_score}
-                              color={audit.compliance_color as any}
+                              value={safeNumber(audit.complianceScore)}
+                              color={complianceGrade.color as any}
                               size="sm"
                             />
                           </div>
                         ) : (
                           <div className="text-xs text-default-400 text-center py-2">
-                            Compliance not assessed
+                            Not assessed
                           </div>
                         )}
+
+                        {audit.progressPercentage !== null &&
+                          audit.progressPercentage !== undefined && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs text-default-600">
+                                  Progress
+                                </span>
+                                <span className="text-xs font-medium">
+                                  {safeNumber(audit.progressPercentage).toFixed(
+                                    0
+                                  )}
+                                  %
+                                </span>
+                              </div>
+                              <Progress
+                                value={safeNumber(audit.progressPercentage)}
+                                color="primary"
+                                size="sm"
+                              />
+                            </div>
+                          )}
                       </div>
                     </TableCell>
 
@@ -1847,8 +1502,9 @@ export default function EnhancedAuditsPage() {
                               size="sm"
                               variant="light"
                               color="success"
-                              onPress={() => handleAuditAction(audit, "start")}
-                              isLoading={isActionLoading}
+                              onPress={() =>
+                                handleStatusChange(audit, "in_progress")
+                              }
                             >
                               <Play className="w-4 h-4" />
                             </Button>
@@ -1863,54 +1519,44 @@ export default function EnhancedAuditsPage() {
                               variant="light"
                               color="primary"
                               onPress={() =>
-                                handleAuditAction(audit, "complete")
+                                handleStatusChange(audit, "completed")
                               }
-                              isLoading={isActionLoading}
                             >
                               <CheckSquare className="w-4 h-4" />
                             </Button>
                           </Tooltip>
                         )}
 
-                        <Tooltip content="Edit Audit">
-                          <Button
-                            isIconOnly
-                            size="sm"
-                            variant="light"
-                            onPress={() => openEditModal(audit)}
-                            isDisabled={
-                              audit.status === "completed" ||
-                              audit.status === "cancelled"
-                            }
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                        </Tooltip>
+                        {["planned", "in_progress", "on_hold"].includes(
+                          audit.status
+                        ) && (
+                          <Tooltip content="Edit Audit">
+                            <Button
+                              isIconOnly
+                              size="sm"
+                              variant="light"
+                              onPress={() => openEditModal(audit)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          </Tooltip>
+                        )}
 
-                        <Tooltip content="Generate Report">
-                          <Button
-                            isIconOnly
-                            size="sm"
-                            variant="light"
-                            color="secondary"
-                            isDisabled={audit.status !== "completed"}
-                          >
-                            <FileText className="w-4 h-4" />
-                          </Button>
-                        </Tooltip>
-
-                        <Tooltip content="Delete Audit">
-                          <Button
-                            isIconOnly
-                            size="sm"
-                            variant="light"
-                            color="danger"
-                            onPress={() => openDeleteModal(audit)}
-                            isDisabled={audit.status === "in_progress"}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </Tooltip>
+                        {["planned", "cancelled", "on_hold"].includes(
+                          audit.status
+                        ) && (
+                          <Tooltip content="Delete Audit">
+                            <Button
+                              isIconOnly
+                              size="sm"
+                              variant="light"
+                              color="danger"
+                              onPress={() => openDeleteModal(audit)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </Tooltip>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1919,45 +1565,36 @@ export default function EnhancedAuditsPage() {
             </TableBody>
           </Table>
 
-          {/* ✅ PERFECT: Enhanced pagination */}
-          {pagination.total_pages > 1 && (
+          {pagination.totalPages > 1 && (
             <div className="flex justify-between items-center p-4 border-t border-divider">
               <div className="text-sm text-default-500">
-                Showing{" "}
-                {(pagination.current_page - 1) * pagination.per_page + 1} to{" "}
+                Showing {(pagination.currentPage - 1) * pagination.perPage + 1}{" "}
+                to{" "}
                 {Math.min(
-                  pagination.current_page * pagination.per_page,
-                  pagination.total_count
+                  pagination.currentPage * pagination.perPage,
+                  pagination.totalCount
                 )}{" "}
-                of {pagination.total_count} audits
+                of {pagination.totalCount} audits
               </div>
               <Pagination
-                total={pagination.total_pages}
-                page={pagination.current_page}
-                onChange={(page) =>
-                  setPagination((prev) => ({ ...prev, current_page: page }))
-                }
+                total={pagination.totalPages}
+                page={pagination.currentPage}
+                onChange={(page) => handleFilterChange("page", page)}
                 showControls
                 showShadow
                 color="primary"
-                siblings={1}
-                boundaries={1}
               />
             </div>
           )}
         </CardBody>
       </Card>
 
-      {/* ✅ PERFECT: Create/Edit Modal */}
+      {/* Create/Edit Modal */}
       <Modal
         isOpen={isCreateOpen || isEditOpen}
         onOpenChange={isCreateOpen ? onCreateClose : onEditClose}
         size="4xl"
         scrollBehavior="inside"
-        classNames={{
-          wrapper: "items-start",
-          base: "mt-6",
-        }}
       >
         <ModalContent>
           {(onClose) => (
@@ -1967,27 +1604,34 @@ export default function EnhancedAuditsPage() {
                   <Shield className="w-6 h-6 text-primary" />
                   <div>
                     <h3 className="text-xl font-semibold">
-                      {isCreateOpen ? "Schedule New Audit" : "Edit Audit"}
+                      {isCreateOpen ? "Create New Audit" : "Edit Audit"}
                     </h3>
                     <p className="text-sm text-default-500 font-normal">
                       {isCreateOpen
-                        ? "Create a comprehensive audit schedule for your facility"
-                        : "Update audit details and schedule information"}
+                        ? "Schedule a new audit for your facility"
+                        : "Update audit details and schedule"}
                     </p>
                   </div>
                 </div>
               </ModalHeader>
 
               <ModalBody className="space-y-6">
-                {/* Basic Information */}
+                {formErrors.general && (
+                  <Card className="border-danger bg-danger-50">
+                    <CardBody className="p-3">
+                      <div className="text-danger-800">
+                        {formErrors.general}
+                      </div>
+                    </CardBody>
+                  </Card>
+                )}
+
                 <div className="space-y-4">
-                  <h4 className="text-lg font-medium text-foreground border-b border-divider pb-2">
-                    Basic Information
-                  </h4>
+                  <h4 className="text-lg font-medium">Basic Information</h4>
 
                   <Input
                     label="Audit Title"
-                    placeholder="Enter descriptive audit title (5-200 characters)"
+                    placeholder="Enter audit title"
                     value={formData.title}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -1998,12 +1642,11 @@ export default function EnhancedAuditsPage() {
                     errorMessage={formErrors.title}
                     isInvalid={!!formErrors.title}
                     isRequired
-                    description="Clear, descriptive title that identifies the audit purpose"
                   />
 
                   <Textarea
                     label="Description"
-                    placeholder="Enter detailed audit description, objectives, and scope"
+                    placeholder="Enter audit description"
                     value={formData.description}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -2012,27 +1655,29 @@ export default function EnhancedAuditsPage() {
                       }))
                     }
                     minRows={3}
-                    maxRows={6}
-                    description="Optional detailed description of audit scope and objectives"
                   />
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Select
                       label="Audit Type"
-                      selectedKeys={new Set([formData.audit_type])}
+                      selectedKeys={new Set([formData.auditType])}
                       onSelectionChange={(keys) => {
-                        const selectedKey = Array.from(keys)[0] as string;
+                        const selectedKey = Array.from(keys)[0] as
+                          | "comprehensive"
+                          | "focused"
+                          | "compliance"
+                          | "energy_efficiency"
+                          | "safety";
                         setFormData((prev) => ({
                           ...prev,
-                          audit_type: selectedKey as any,
+                          auditType: selectedKey,
                         }));
                       }}
                       isRequired
-                      description="Type of audit to be conducted"
                     >
-                      {AUDIT_CONFIGURATION.types.map((type) => (
+                      {AUDIT_TYPES.map((type) => (
                         <SelectItem
-                          key={type.key}
+                          key={type.value}
                           description={type.description}
                           startContent={type.icon}
                         >
@@ -2042,173 +1687,87 @@ export default function EnhancedAuditsPage() {
                     </Select>
 
                     <Input
-                      label="Estimated Duration"
+                      label="Estimated Duration (hours)"
                       type="number"
-                      placeholder="Hours (e.g., 8)"
-                      value={
-                        formData.estimated_duration_hours?.toString() || ""
-                      }
+                      min="1"
+                      max="1000"
+                      value={formData.estimatedDurationHours.toString()}
                       onChange={(e) =>
                         setFormData((prev) => ({
                           ...prev,
-                          estimated_duration_hours: e.target.value
-                            ? parseInt(e.target.value)
-                            : null,
+                          estimatedDurationHours: Math.max(
+                            1,
+                            parseInt(e.target.value) || 1
+                          ),
                         }))
                       }
-                      errorMessage={formErrors.estimated_duration_hours}
-                      isInvalid={!!formErrors.estimated_duration_hours}
-                      endContent={
-                        <div className="pointer-events-none flex items-center">
-                          <span className="text-default-400 text-small">
-                            hours
-                          </span>
-                        </div>
-                      }
-                      description="Estimated time to complete the audit"
+                      errorMessage={formErrors.estimatedDurationHours}
+                      isInvalid={!!formErrors.estimatedDurationHours}
+                      startContent={<Timer className="w-4 h-4" />}
                     />
                   </div>
                 </div>
 
-                {/* Assignment */}
                 <div className="space-y-4">
-                  <h4 className="text-lg font-medium text-foreground border-b border-divider pb-2">
-                    Assignment & Location
-                  </h4>
+                  <h4 className="text-lg font-medium">Location & Schedule</h4>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select
-                      label="Building"
-                      placeholder="Select building for audit"
-                      selectedKeys={
-                        formData.building_id
-                          ? new Set([formData.building_id.toString()])
-                          : new Set()
-                      }
-                      onSelectionChange={(keys) => {
-                        const selectedKey = Array.from(keys)[0] as string;
-                        setFormData((prev) => ({
-                          ...prev,
-                          building_id: selectedKey
-                            ? parseInt(selectedKey)
-                            : null,
-                        }));
-                      }}
-                      errorMessage={formErrors.building_id}
-                      isInvalid={!!formErrors.building_id}
-                      isRequired
-                      isDisabled={buildingSelectOptions.length === 0}
-                      startContent={<BuildingIcon className="w-4 h-4" />}
-                      description="Building where the audit will be conducted"
-                    >
-                      {buildingSelectOptions.map((option) => (
-                        <SelectItem key={option.key}>{option.label}</SelectItem>
-                      ))}
-                    </Select>
-
-                    <Select
-                      label="Auditor"
-                      placeholder={
-                        userSelectOptions.length === 0
-                          ? "No auditors available"
-                          : "Select responsible auditor"
-                      }
-                      selectedKeys={
-                        formData.auditor_id
-                          ? new Set([formData.auditor_id.toString()])
-                          : new Set()
-                      }
-                      onSelectionChange={(keys) => {
-                        const selectedKey = Array.from(keys)[0] as string;
-                        setFormData((prev) => ({
-                          ...prev,
-                          auditor_id: selectedKey
-                            ? parseInt(selectedKey)
-                            : null,
-                        }));
-                      }}
-                      errorMessage={formErrors.auditor_id}
-                      isInvalid={!!formErrors.auditor_id}
-                      isDisabled={userSelectOptions.length === 0}
-                      startContent={<UserIcon className="w-4 h-4" />}
-                      description={
-                        userSelectOptions.length === 0
-                          ? "Audit will be created without assigned auditor"
-                          : "Person responsible for conducting the audit"
-                      }
-                    >
-                      {userSelectOptions.map((option) => (
-                        <SelectItem key={option.key}>{option.label}</SelectItem>
-                      ))}
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Schedule */}
-                <div className="space-y-4">
-                  <h4 className="text-lg font-medium text-foreground border-b border-divider pb-2">
-                    Schedule & Timeline
-                  </h4>
+                  <Select
+                    label="Building"
+                    placeholder="Select building"
+                    selectedKeys={
+                      formData.buildingId
+                        ? new Set([formData.buildingId.toString()])
+                        : new Set()
+                    }
+                    onSelectionChange={(keys) => {
+                      const selectedKey = Array.from(keys)[0] as string;
+                      setFormData((prev) => ({
+                        ...prev,
+                        buildingId: selectedKey ? parseInt(selectedKey) : null,
+                      }));
+                    }}
+                    errorMessage={formErrors.buildingId}
+                    isInvalid={!!formErrors.buildingId}
+                    isRequired
+                    startContent={<BuildingIcon className="w-4 h-4" />}
+                    isDisabled={buildingOptions.length === 0}
+                  >
+                    {buildingOptions.map((option) => (
+                      <SelectItem key={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </Select>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Input
                       label="Planned Start Date"
                       type="date"
-                      value={formData.planned_start_date}
+                      value={formData.plannedStartDate}
                       onChange={(e) =>
                         setFormData((prev) => ({
                           ...prev,
-                          planned_start_date: e.target.value,
+                          plannedStartDate: e.target.value,
                         }))
                       }
-                      errorMessage={formErrors.planned_start_date}
-                      isInvalid={!!formErrors.planned_start_date}
+                      errorMessage={formErrors.plannedStartDate}
+                      isInvalid={!!formErrors.plannedStartDate}
                       isRequired
-                      startContent={<Calendar className="w-4 h-4" />}
-                      description="When the audit is scheduled to begin"
                     />
 
                     <Input
                       label="Planned End Date"
                       type="date"
-                      value={formData.planned_end_date}
+                      value={formData.plannedEndDate}
                       onChange={(e) =>
                         setFormData((prev) => ({
                           ...prev,
-                          planned_end_date: e.target.value,
+                          plannedEndDate: e.target.value,
                         }))
                       }
-                      errorMessage={formErrors.planned_end_date}
-                      isInvalid={!!formErrors.planned_end_date}
-                      isRequired
-                      startContent={<Calendar className="w-4 h-4" />}
-                      description="Expected completion date for the audit"
+                      errorMessage={formErrors.plannedEndDate}
+                      isInvalid={!!formErrors.plannedEndDate}
+                      min={formData.plannedStartDate}
                     />
                   </div>
-
-                  {formData.planned_start_date && formData.planned_end_date && (
-                    <Card className="bg-primary-50 border-primary-200">
-                      <CardBody className="p-3">
-                        <div className="flex items-center gap-2 text-primary-800">
-                          <Info className="w-4 h-4" />
-                          <span className="text-sm">
-                            Audit duration:{" "}
-                            {(() => {
-                              const start = new Date(
-                                formData.planned_start_date
-                              );
-                              const end = new Date(formData.planned_end_date);
-                              const diffTime = end.getTime() - start.getTime();
-                              const diffDays = Math.ceil(
-                                diffTime / (1000 * 60 * 60 * 24)
-                              );
-                              return `${diffDays} day${diffDays !== 1 ? "s" : ""}`;
-                            })()}
-                          </span>
-                        </div>
-                      </CardBody>
-                    </Card>
-                  )}
                 </div>
               </ModalBody>
 
@@ -2219,24 +1778,24 @@ export default function EnhancedAuditsPage() {
                 <Button
                   color="primary"
                   onPress={isCreateOpen ? handleCreateAudit : handleUpdateAudit}
-                  isLoading={submitting}
+                  isLoading={isSubmitting}
                   startContent={
-                    !submitting ? (
+                    !isSubmitting ? (
                       isCreateOpen ? (
                         <Plus className="w-4 h-4" />
                       ) : (
-                        <Edit className="w-4 h-4" />
+                        <Save className="w-4 h-4" />
                       )
-                    ) : null
+                    ) : undefined
                   }
                 >
-                  {submitting
+                  {isSubmitting
                     ? isCreateOpen
-                      ? "Scheduling..."
-                      : "Updating..."
+                      ? "Creating..."
+                      : "Saving..."
                     : isCreateOpen
-                      ? "Schedule Audit"
-                      : "Update Audit"}
+                      ? "Create Audit"
+                      : "Save Changes"}
                 </Button>
               </ModalFooter>
             </>
@@ -2244,16 +1803,12 @@ export default function EnhancedAuditsPage() {
         </ModalContent>
       </Modal>
 
-      {/* ✅ PERFECT: View Audit Modal */}
+      {/* View Modal */}
       <Modal
         isOpen={isViewOpen}
         onOpenChange={onViewClose}
         size="5xl"
         scrollBehavior="inside"
-        classNames={{
-          wrapper: "items-start",
-          base: "mt-6",
-        }}
       >
         <ModalContent>
           {(onClose) => (
@@ -2264,32 +1819,28 @@ export default function EnhancedAuditsPage() {
                     <Shield className="w-6 h-6 text-primary" />
                     <div>
                       <h3 className="text-xl font-semibold">
-                        {selectedAudit?.title}
+                        {safeString(selectedAudit?.title)}
                       </h3>
                       <p className="text-sm text-default-500 font-normal">
-                        Audit ID: {selectedAudit?.id} • Created{" "}
-                        {formatDate(selectedAudit?.created_at)}
+                        ID: {selectedAudit?.id} • Created{" "}
+                        {formatDate(selectedAudit?.createdAt)}
                       </p>
                     </div>
                   </div>
                   {selectedAudit && (
                     <div className="flex gap-2">
                       <Chip
-                        color={
-                          getStatusConfig(selectedAudit.status).color as any
-                        }
+                        color={getStatusConfig(selectedAudit.status).color}
                         size="sm"
                       >
                         {getStatusConfig(selectedAudit.status).label}
                       </Chip>
                       <Chip
-                        color={
-                          getTypeConfig(selectedAudit.audit_type).color as any
-                        }
+                        color={getTypeConfig(selectedAudit.auditType).color}
                         size="sm"
                         variant="flat"
                       >
-                        {getTypeConfig(selectedAudit.audit_type).label}
+                        {getTypeConfig(selectedAudit.auditType).label}
                       </Chip>
                     </div>
                   )}
@@ -2299,7 +1850,70 @@ export default function EnhancedAuditsPage() {
               <ModalBody>
                 {selectedAudit && (
                   <div className="space-y-6">
-                    {/* Basic Information Grid */}
+                    {/* Overview Cards */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      <Card>
+                        <CardBody className="text-center p-4">
+                          <div className="text-2xl font-bold text-primary">
+                            {selectedAudit.complianceScore !== null &&
+                            selectedAudit.complianceScore !== undefined
+                              ? safeNumber(
+                                  selectedAudit.complianceScore
+                                ).toFixed(1) + "%"
+                              : "N/A"}
+                          </div>
+                          <div className="text-sm text-default-600">
+                            Compliance Score
+                          </div>
+                          {selectedAudit.complianceScore !== null &&
+                            selectedAudit.complianceScore !== undefined && (
+                              <div className="text-lg font-medium mt-1">
+                                {
+                                  getComplianceGrade(
+                                    selectedAudit.complianceScore
+                                  ).grade
+                                }
+                              </div>
+                            )}
+                        </CardBody>
+                      </Card>
+
+                      <Card>
+                        <CardBody className="text-center p-4">
+                          <div className="text-2xl font-bold text-secondary">
+                            {safeNumber(
+                              selectedAudit.estimatedDurationHours,
+                              0
+                            )}
+                            h
+                          </div>
+                          <div className="text-sm text-default-600">
+                            Est. Duration
+                          </div>
+                          <div className="text-sm text-default-500 mt-1">
+                            {getTypeConfig(selectedAudit.auditType).label}
+                          </div>
+                        </CardBody>
+                      </Card>
+
+                      <Card>
+                        <CardBody className="text-center p-4">
+                          <div className="text-2xl font-bold text-warning">
+                            {selectedAudit.progressPercentage !== null &&
+                            selectedAudit.progressPercentage !== undefined
+                              ? safeNumber(
+                                  selectedAudit.progressPercentage
+                                ).toFixed(0) + "%"
+                              : "0%"}
+                          </div>
+                          <div className="text-sm text-default-600">
+                            Progress
+                          </div>
+                        </CardBody>
+                      </Card>
+                    </div>
+
+                    {/* Detailed Information */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <Card>
                         <CardHeader>
@@ -2312,19 +1926,10 @@ export default function EnhancedAuditsPage() {
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <span className="text-sm text-default-600">
-                                ID:
-                              </span>
-                              <div className="font-medium">
-                                {selectedAudit.id}
-                              </div>
-                            </div>
-                            <div>
-                              <span className="text-sm text-default-600">
                                 Type:
                               </span>
                               <div className="font-medium">
-                                {getTypeConfig(selectedAudit.audit_type).icon}{" "}
-                                {getTypeConfig(selectedAudit.audit_type).label}
+                                {getTypeConfig(selectedAudit.auditType).label}
                               </div>
                             </div>
                             <div>
@@ -2335,18 +1940,6 @@ export default function EnhancedAuditsPage() {
                                 {getStatusConfig(selectedAudit.status).label}
                               </div>
                             </div>
-                            <div>
-                              <span className="text-sm text-default-600">
-                                Duration:
-                              </span>
-                              <div className="font-medium">
-                                {selectedAudit.estimated_duration_hours ||
-                                  "Not set"}
-                                {selectedAudit.estimated_duration_hours
-                                  ? " hours"
-                                  : ""}
-                              </div>
-                            </div>
                           </div>
 
                           <div>
@@ -2355,7 +1948,8 @@ export default function EnhancedAuditsPage() {
                             </span>
                             <div className="font-medium flex items-center gap-2">
                               <BuildingIcon className="w-4 h-4 text-default-400" />
-                              {selectedAudit.building_name_display}
+                              {safeString(selectedAudit.buildingName) ||
+                                `Building ${selectedAudit.buildingId}`}
                             </div>
                           </div>
 
@@ -2365,16 +1959,8 @@ export default function EnhancedAuditsPage() {
                             </span>
                             <div className="font-medium flex items-center gap-2">
                               <UserIcon className="w-4 h-4 text-default-400" />
-                              {selectedAudit.auditor_name_display}
-                            </div>
-                          </div>
-
-                          <div>
-                            <span className="text-sm text-default-600">
-                              Created:
-                            </span>
-                            <div className="font-medium">
-                              {formatDateTime(selectedAudit.created_at)}
+                              {safeString(selectedAudit.auditorName) ||
+                                "Unassigned"}
                             </div>
                           </div>
                         </CardBody>
@@ -2384,93 +1970,51 @@ export default function EnhancedAuditsPage() {
                         <CardHeader>
                           <h4 className="font-semibold flex items-center">
                             <Calendar className="w-4 h-4 mr-2" />
-                            Schedule & Timeline
+                            Timeline
                           </h4>
                         </CardHeader>
                         <CardBody className="space-y-3">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <span className="text-sm text-default-600">
-                                Planned Start:
-                              </span>
-                              <div className="font-medium">
-                                {formatDate(selectedAudit.planned_start_date)}
-                              </div>
+                          <div>
+                            <span className="text-sm text-default-600">
+                              Planned Start:
+                            </span>
+                            <div className="font-medium">
+                              {formatDate(selectedAudit.plannedStartDate)}
                             </div>
+                          </div>
+
+                          {selectedAudit.plannedEndDate && (
                             <div>
                               <span className="text-sm text-default-600">
                                 Planned End:
                               </span>
                               <div className="font-medium">
-                                {formatDate(selectedAudit.planned_end_date)}
+                                {formatDate(selectedAudit.plannedEndDate)}
                               </div>
                             </div>
-                          </div>
+                          )}
 
-                          {selectedAudit.actual_start_date && (
+                          {selectedAudit.actualStartDate && (
                             <div>
                               <span className="text-sm text-default-600">
                                 Actual Start:
                               </span>
                               <div className="font-medium text-success">
-                                {formatDateTime(
-                                  selectedAudit.actual_start_date
-                                )}
+                                {formatDateTime(selectedAudit.actualStartDate)}
                               </div>
                             </div>
                           )}
 
-                          {selectedAudit.actual_end_date && (
+                          {selectedAudit.actualEndDate && (
                             <div>
                               <span className="text-sm text-default-600">
                                 Actual End:
                               </span>
                               <div className="font-medium text-success">
-                                {formatDateTime(selectedAudit.actual_end_date)}
+                                {formatDateTime(selectedAudit.actualEndDate)}
                               </div>
                             </div>
                           )}
-
-                          <div>
-                            <span className="text-sm text-default-600">
-                              Progress:
-                            </span>
-                            <div className="mt-1">
-                              <Progress
-                                value={selectedAudit.progress_percentage || 0}
-                                className="mb-1"
-                                color="primary"
-                              />
-                              <span className="text-sm font-medium">
-                                {selectedAudit.progress_percentage || 0}%
-                                complete
-                              </span>
-                            </div>
-                          </div>
-
-                          {selectedAudit.urgency_status &&
-                            selectedAudit.urgency_status !== "normal" && (
-                              <div>
-                                <span className="text-sm text-default-600">
-                                  Urgency:
-                                </span>
-                                <div className="mt-1">
-                                  <Chip
-                                    color={
-                                      selectedAudit.urgency_status ===
-                                      "critical"
-                                        ? "danger"
-                                        : "warning"
-                                    }
-                                    size="sm"
-                                  >
-                                    {selectedAudit.urgency_status === "critical"
-                                      ? "Critical - Overdue"
-                                      : "Urgent - Due Soon"}
-                                  </Chip>
-                                </div>
-                              </div>
-                            )}
                         </CardBody>
                       </Card>
                     </div>
@@ -2479,555 +2023,68 @@ export default function EnhancedAuditsPage() {
                     {selectedAudit.description && (
                       <Card>
                         <CardHeader>
-                          <h4 className="font-semibold">
-                            Description & Objectives
-                          </h4>
+                          <h4 className="font-semibold">Description</h4>
                         </CardHeader>
                         <CardBody>
-                          <p className="whitespace-pre-wrap text-default-700">
-                            {selectedAudit.description}
+                          <p className="whitespace-pre-wrap">
+                            {safeString(selectedAudit.description)}
                           </p>
                         </CardBody>
                       </Card>
                     )}
 
-                    {/* Compliance Overview */}
-                    <Card>
-                      <CardHeader>
-                        <div className="flex items-center justify-between w-full">
-                          <h4 className="font-semibold flex items-center">
-                            <Target className="w-4 h-4 mr-2" />
-                            Compliance Overview
-                          </h4>
-                          {loadingCompliance && <Spinner size="sm" />}
-                        </div>
-                      </CardHeader>
-                      <CardBody>
-                        {selectedAudit.compliance_score !== null &&
-                        selectedAudit.compliance_score !== undefined ? (
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <span className="font-medium text-lg">
-                                Overall Compliance Score
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <Award className="w-5 h-5 text-warning" />
-                                <span className="text-2xl font-bold">
-                                  {selectedAudit.compliance_score.toFixed(1)}%
-                                </span>
-                              </div>
-                            </div>
-                            <Progress
-                              value={selectedAudit.compliance_score}
-                              color={selectedAudit.compliance_color as any}
-                              size="lg"
-                              className="mb-2"
-                            />
-
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div className="text-center p-3 bg-content2 rounded-lg">
-                                <div className="text-2xl font-bold text-success">
-                                  {selectedAudit.compliance_score >= 90
-                                    ? "Excellent"
-                                    : selectedAudit.compliance_score >= 70
-                                      ? "Good"
-                                      : "Needs Improvement"}
-                                </div>
-                                <div className="text-sm text-default-600">
-                                  Grade
-                                </div>
-                              </div>
-                              <div className="text-center p-3 bg-content2 rounded-lg">
-                                <div className="text-2xl font-bold text-primary">
-                                  {complianceChecks.length}
-                                </div>
-                                <div className="text-sm text-default-600">
-                                  Total Checks
-                                </div>
-                              </div>
-                              <div className="text-center p-3 bg-content2 rounded-lg">
-                                <div className="text-2xl font-bold text-warning">
-                                  {complianceStandards.length}
-                                </div>
-                                <div className="text-sm text-default-600">
-                                  Standards
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Standards breakdown */}
-                            {complianceStandards.length > 0 && (
-                              <div className="mt-4">
-                                <h5 className="font-medium mb-3">
-                                  Compliance Standards Assessment
-                                </h5>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  {complianceStandards.map(
-                                    (standard, index) => (
-                                      <div
-                                        key={standard.standard || index}
-                                        className="flex items-center justify-between p-3 bg-content2 rounded-lg"
-                                      >
-                                        <div>
-                                          <div className="font-medium">
-                                            {standard.standard}
-                                          </div>
-                                          <div className="text-sm text-default-500">
-                                            {standard.name}
-                                          </div>
-                                        </div>
-                                        <div className="text-right">
-                                          <Chip
-                                            size="sm"
-                                            color={
-                                              getComplianceColor(
-                                                standard.score
-                                              ) as any
-                                            }
-                                          >
-                                            {standard.score?.toFixed(1)}%
-                                          </Chip>
-                                          <div className="text-xs text-default-500 mt-1">
-                                            {standard.status}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-center py-12">
-                            <BarChart3 className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                            <h5 className="text-lg font-medium mb-2">
-                              Compliance Assessment Pending
-                            </h5>
-                            <p className="text-default-500 mb-4">
-                              Compliance results will be available when the
-                              audit is in progress or completed.
-                            </p>
-                            {selectedAudit.status === "planned" && (
-                              <p className="text-sm text-default-400">
-                                Start the audit to begin compliance assessment.
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </CardBody>
-                    </Card>
-
-                    {/* Detailed Compliance Checks */}
-                    {complianceChecks.length > 0 && (
+                    {/* Compliance Data */}
+                    {complianceData.length > 0 && (
                       <Card>
                         <CardHeader>
                           <h4 className="font-semibold flex items-center">
                             <CheckSquare className="w-4 h-4 mr-2" />
-                            Detailed Compliance Checks (
-                            {complianceChecks.length})
+                            Compliance Checks ({complianceData.length})
                           </h4>
                         </CardHeader>
                         <CardBody>
-                          {loadingCompliance ? (
-                            <div className="space-y-3">
-                              {Array.from({ length: 3 }).map((_, i) => (
-                                <Skeleton key={i} className="h-20 rounded-lg" />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="space-y-3 max-h-96 overflow-y-auto">
-                              {complianceChecks
-                                .slice(0, 20)
-                                .map((check, index) => (
-                                  <div
-                                    key={check.id || index}
-                                    className="flex items-start justify-between p-4 border border-content2 rounded-lg hover:bg-content2 transition-colors"
-                                  >
-                                    <div className="flex-1">
-                                      <div className="font-medium text-foreground">
-                                        {check.requirement_title ||
-                                          check.check_description ||
-                                          `Compliance Check ${index + 1}`}
-                                      </div>
-                                      <div className="text-sm text-default-500 mt-1">
-                                        {check.standard_type || check.standard}
-                                        {check.section_code &&
-                                          ` - Section ${check.section_code}`}
-                                        {check.requirement_code &&
-                                          ` (${check.requirement_code})`}
-                                      </div>
-                                      {check.details && (
-                                        <div className="text-sm text-default-600 mt-2">
-                                          {check.details}
-                                        </div>
-                                      )}
-                                      {check.measured_value !== null &&
-                                        check.measured_value !== undefined && (
-                                          <div className="text-xs text-default-400 mt-2 flex items-center gap-4">
-                                            <span>
-                                              Measured: {check.measured_value}
-                                              {check.unit && ` ${check.unit}`}
-                                            </span>
-                                            {check.required_value && (
-                                              <span>
-                                                Required: {check.required_value}
-                                                {check.unit && ` ${check.unit}`}
-                                              </span>
-                                            )}
-                                          </div>
-                                        )}
-                                      {check.recommendation && (
-                                        <div className="text-sm text-warning-700 mt-2 p-2 bg-warning-50 rounded">
-                                          <strong>Recommendation:</strong>{" "}
-                                          {check.recommendation}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="ml-4 flex flex-col items-end space-y-2">
-                                      <Chip
-                                        color={
-                                          check.status === "passed" ||
-                                          check.status === "compliant"
-                                            ? "success"
-                                            : check.status === "warning"
-                                              ? "warning"
-                                              : "danger"
-                                        }
-                                        size="sm"
-                                        variant="solid"
-                                      >
-                                        {check.status}
-                                      </Chip>
-                                      {check.severity && (
-                                        <div className="text-xs text-default-500">
-                                          {check.severity} severity
-                                        </div>
-                                      )}
-                                      {check.assessment_date && (
-                                        <div className="text-xs text-default-400">
-                                          {formatDate(check.assessment_date)}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              {complianceChecks.length > 20 && (
-                                <div className="text-center text-sm text-default-500 py-3 border-t border-divider">
-                                  ... and {complianceChecks.length - 20} more
-                                  checks
-                                  <Button
-                                    size="sm"
-                                    variant="light"
-                                    className="ml-2"
-                                    startContent={<Eye className="w-3 h-3" />}
-                                  >
-                                    View All
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </CardBody>
-                      </Card>
-                    )}
-
-                    {/* Audit Timeline */}
-                    <Card>
-                      <CardHeader>
-                        <h4 className="font-semibold flex items-center">
-                          <Clock className="w-4 h-4 mr-2" />
-                          Audit Timeline & History
-                        </h4>
-                      </CardHeader>
-                      <CardBody>
-                        <div className="space-y-6">
-                          {/* Timeline Items */}
-                          <div className="relative">
-                            {/* Created */}
-                            <div className="flex items-start space-x-4">
-                              <div className="flex flex-col items-center">
-                                <div className="w-4 h-4 bg-primary rounded-full border-2 border-white shadow"></div>
-                                <div className="w-px bg-divider h-8"></div>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium">
-                                  Audit Scheduled
-                                </div>
-                                <div className="text-sm text-default-500">
-                                  {formatDateTime(selectedAudit.created_at)}
-                                </div>
-                                <div className="text-xs text-default-400 mt-1">
-                                  Audit created and added to schedule
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Planned Start */}
-                            <div className="flex items-start space-x-4">
-                              <div className="flex flex-col items-center">
-                                <div
-                                  className={`w-4 h-4 rounded-full border-2 border-white shadow ${
-                                    selectedAudit.actual_start_date
-                                      ? "bg-success"
-                                      : selectedAudit.status === "in_progress"
-                                        ? "bg-warning animate-pulse"
-                                        : "bg-default-300"
-                                  }`}
-                                ></div>
-                                {(selectedAudit.actual_start_date ||
-                                  selectedAudit.actual_end_date) && (
-                                  <div className="w-px bg-divider h-8"></div>
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium">
-                                  {selectedAudit.actual_start_date
-                                    ? "Audit Started"
-                                    : "Planned Start"}
-                                </div>
-                                <div className="text-sm text-default-500">
-                                  {selectedAudit.actual_start_date
-                                    ? formatDateTime(
-                                        selectedAudit.actual_start_date
-                                      )
-                                    : formatDate(
-                                        selectedAudit.planned_start_date
-                                      )}
-                                </div>
-                                <div className="text-xs text-default-400 mt-1">
-                                  {selectedAudit.actual_start_date
-                                    ? "Audit execution began"
-                                    : selectedAudit.status === "planned"
-                                      ? "Scheduled to begin"
-                                      : "Originally planned start date"}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* In Progress Status */}
-                            {selectedAudit.status === "in_progress" &&
-                              !selectedAudit.actual_end_date && (
-                                <div className="flex items-start space-x-4">
-                                  <div className="flex flex-col items-center">
-                                    <div className="w-4 h-4 bg-primary rounded-full border-2 border-white shadow animate-pulse"></div>
-                                    <div className="w-px bg-divider h-8"></div>
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-medium">
-                                      Currently In Progress
-                                    </div>
-                                    <div className="text-sm text-default-500">
-                                      {selectedAudit.progress_percentage || 0}%
-                                      complete
-                                    </div>
-                                    <div className="text-xs text-default-400 mt-1">
-                                      Expected completion:{" "}
-                                      {formatDate(
-                                        selectedAudit.planned_end_date
-                                      )}
-                                    </div>
-                                    <Progress
-                                      value={
-                                        selectedAudit.progress_percentage || 0
-                                      }
-                                      color="primary"
-                                      size="sm"
-                                      className="mt-2 max-w-xs"
-                                    />
-                                  </div>
-                                </div>
-                              )}
-
-                            {/* Completed */}
-                            {selectedAudit.actual_end_date && (
-                              <div className="flex items-start space-x-4">
-                                <div className="flex flex-col items-center">
-                                  <div className="w-4 h-4 bg-success rounded-full border-2 border-white shadow"></div>
-                                </div>
-                                <div className="flex-1 min-w-0">
+                          <div className="space-y-3 max-h-96 overflow-y-auto">
+                            {complianceData.slice(0, 10).map((check, index) => (
+                              <div
+                                key={check.id || index}
+                                className="flex items-start justify-between p-4 border border-content2 rounded-lg"
+                              >
+                                <div className="flex-1">
                                   <div className="font-medium">
-                                    Audit Completed
+                                    {safeString(check.requirementTitle) ||
+                                      `Check ${index + 1}`}
                                   </div>
-                                  <div className="text-sm text-default-500">
-                                    {formatDateTime(
-                                      selectedAudit.actual_end_date
-                                    )}
+                                  <div className="text-sm text-default-500 mt-1">
+                                    {safeString(check.standardType) ||
+                                      safeString(check.standard)}
                                   </div>
-                                  <div className="text-xs text-default-400 mt-1">
-                                    Audit successfully completed
-                                  </div>
-                                  {selectedAudit.compliance_score !== null &&
-                                    selectedAudit.compliance_score !==
-                                      undefined && (
-                                      <div className="mt-2">
-                                        <Chip
-                                          size="sm"
-                                          color={
-                                            selectedAudit.compliance_color as any
-                                          }
-                                        >
-                                          Final Score:{" "}
-                                          {selectedAudit.compliance_score.toFixed(
-                                            1
-                                          )}
-                                          %
-                                        </Chip>
-                                      </div>
-                                    )}
+                                  {check.details && (
+                                    <div className="text-sm text-default-600 mt-2">
+                                      {safeString(check.details)}
+                                    </div>
+                                  )}
                                 </div>
+                                <Chip
+                                  color={
+                                    check.status === "passed" ||
+                                    check.status === "compliant"
+                                      ? "success"
+                                      : check.status === "warning"
+                                        ? "warning"
+                                        : "danger"
+                                  }
+                                  size="sm"
+                                >
+                                  {safeString(check.status)}
+                                </Chip>
                               </div>
-                            )}
-
-                            {/* Planned End (if not completed) */}
-                            {!selectedAudit.actual_end_date && (
-                              <div className="flex items-start space-x-4">
-                                <div className="flex flex-col items-center">
-                                  <div className="w-4 h-4 bg-default-300 rounded-full border-2 border-white shadow"></div>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium">
-                                    Planned Completion
-                                  </div>
-                                  <div className="text-sm text-default-500">
-                                    {formatDate(selectedAudit.planned_end_date)}
-                                  </div>
-                                  <div className="text-xs text-default-400 mt-1">
-                                    Target completion date
-                                  </div>
-                                </div>
+                            ))}
+                            {complianceData.length > 10 && (
+                              <div className="text-center text-sm text-default-500">
+                                And {complianceData.length - 10} more checks...
                               </div>
                             )}
                           </div>
-
-                          {/* Duration Summary */}
-                          <div className="pt-4 border-t border-divider">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                              <div className="text-center p-3 bg-content2 rounded-lg">
-                                <div className="text-lg font-bold text-primary">
-                                  {selectedAudit.estimated_duration_hours ||
-                                    "N/A"}
-                                </div>
-                                <div className="text-sm text-default-600">
-                                  Estimated Hours
-                                </div>
-                              </div>
-                              <div className="text-center p-3 bg-content2 rounded-lg">
-                                <div className="text-lg font-bold text-success">
-                                  {selectedAudit.actual_duration_hours ||
-                                    (selectedAudit.actual_start_date &&
-                                    selectedAudit.actual_end_date
-                                      ? Math.round(
-                                          (new Date(
-                                            selectedAudit.actual_end_date
-                                          ).getTime() -
-                                            new Date(
-                                              selectedAudit.actual_start_date
-                                            ).getTime()) /
-                                            (1000 * 60 * 60)
-                                        )
-                                      : "TBD")}
-                                </div>
-                                <div className="text-sm text-default-600">
-                                  Actual Hours
-                                </div>
-                              </div>
-                              <div className="text-center p-3 bg-content2 rounded-lg">
-                                <div className="text-lg font-bold text-warning">
-                                  {(() => {
-                                    const planned =
-                                      selectedAudit?.planned_end_date
-                                        ? new Date(
-                                            selectedAudit.planned_end_date
-                                          ).getTime()
-                                        : 0;
-                                    const actual = selectedAudit.actual_end_date
-                                      ? new Date(
-                                          selectedAudit.actual_end_date
-                                        ).getTime()
-                                      : Date.now();
-                                    const diffDays = Math.round(
-                                      (actual - planned) / (1000 * 60 * 60 * 24)
-                                    );
-                                    return diffDays > 0
-                                      ? `+${diffDays}`
-                                      : diffDays === 0
-                                        ? "On Time"
-                                        : diffDays;
-                                  })()}
-                                </div>
-                                <div className="text-sm text-default-600">
-                                  Days vs Planned
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </CardBody>
-                    </Card>
-
-                    {/* Additional Information */}
-                    {(selectedAudit.energy_savings_potential_kwh ||
-                      selectedAudit.cost_savings_potential_php ||
-                      selectedAudit.implementation_cost_php) && (
-                      <Card>
-                        <CardHeader>
-                          <h4 className="font-semibold flex items-center">
-                            <TrendingUp className="w-4 h-4 mr-2" />
-                            Financial Impact & Savings
-                          </h4>
-                        </CardHeader>
-                        <CardBody>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {selectedAudit.energy_savings_potential_kwh && (
-                              <div className="text-center p-4 bg-success-50 rounded-lg border border-success-200">
-                                <Zap className="w-8 h-8 text-success mx-auto mb-2" />
-                                <div className="text-2xl font-bold text-success">
-                                  {selectedAudit.energy_savings_potential_kwh.toLocaleString()}
-                                </div>
-                                <div className="text-sm text-success-700">
-                                  kWh Potential Savings
-                                </div>
-                              </div>
-                            )}
-
-                            {selectedAudit.cost_savings_potential_php && (
-                              <div className="text-center p-4 bg-primary-50 rounded-lg border border-primary-200">
-                                <TrendingUp className="w-8 h-8 text-primary mx-auto mb-2" />
-                                <div className="text-2xl font-bold text-primary">
-                                  ₱
-                                  {selectedAudit.cost_savings_potential_php.toLocaleString()}
-                                </div>
-                                <div className="text-sm text-primary-700">
-                                  Cost Savings Potential
-                                </div>
-                              </div>
-                            )}
-
-                            {selectedAudit.implementation_cost_php && (
-                              <div className="text-center p-4 bg-warning-50 rounded-lg border border-warning-200">
-                                <Settings className="w-8 h-8 text-warning mx-auto mb-2" />
-                                <div className="text-2xl font-bold text-warning">
-                                  ₱
-                                  {selectedAudit.implementation_cost_php.toLocaleString()}
-                                </div>
-                                <div className="text-sm text-warning-700">
-                                  Implementation Cost
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {selectedAudit.payback_period_months && (
-                            <div className="mt-4 text-center p-3 bg-content2 rounded-lg">
-                              <div className="text-lg font-bold">
-                                {selectedAudit.payback_period_months} months
-                              </div>
-                              <div className="text-sm text-default-600">
-                                Estimated Payback Period
-                              </div>
-                            </div>
-                          )}
                         </CardBody>
                       </Card>
                     )}
@@ -3038,12 +2095,12 @@ export default function EnhancedAuditsPage() {
               <ModalFooter>
                 <div className="flex justify-between w-full">
                   <div className="flex gap-2">
-                    {selectedAudit && selectedAudit.status === "planned" && (
+                    {selectedAudit?.status === "planned" && (
                       <Button
                         color="success"
                         startContent={<Play className="w-4 h-4" />}
                         onPress={() => {
-                          handleAuditAction(selectedAudit, "start");
+                          handleStatusChange(selectedAudit, "in_progress");
                           onClose();
                         }}
                       >
@@ -3051,32 +2108,23 @@ export default function EnhancedAuditsPage() {
                       </Button>
                     )}
 
-                    {selectedAudit &&
-                      selectedAudit.status === "in_progress" && (
-                        <Button
-                          color="primary"
-                          startContent={<CheckSquare className="w-4 h-4" />}
-                          onPress={() => {
-                            handleAuditAction(selectedAudit, "complete");
-                            onClose();
-                          }}
-                        >
-                          Complete Audit
-                        </Button>
-                      )}
-
-                    <Button
-                      startContent={<Download className="w-4 h-4" />}
-                      color="secondary"
-                      variant="flat"
-                      isDisabled={selectedAudit?.status !== "completed"}
-                    >
-                      Export Report
-                    </Button>
+                    {selectedAudit?.status === "in_progress" && (
+                      <Button
+                        color="primary"
+                        startContent={<CheckSquare className="w-4 h-4" />}
+                        onPress={() => {
+                          handleStatusChange(selectedAudit, "completed");
+                          onClose();
+                        }}
+                      >
+                        Complete Audit
+                      </Button>
+                    )}
 
                     {selectedAudit &&
-                      selectedAudit.status !== "completed" &&
-                      selectedAudit.status !== "cancelled" && (
+                      ["planned", "in_progress", "on_hold"].includes(
+                        selectedAudit.status
+                      ) && (
                         <Button
                           startContent={<Edit className="w-4 h-4" />}
                           variant="flat"
@@ -3085,7 +2133,7 @@ export default function EnhancedAuditsPage() {
                             onClose();
                           }}
                         >
-                          Edit Audit
+                          Edit
                         </Button>
                       )}
                   </div>
@@ -3100,7 +2148,7 @@ export default function EnhancedAuditsPage() {
         </ModalContent>
       </Modal>
 
-      {/* ✅ PERFECT: Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteClose} size="md">
         <ModalContent>
           {(onClose) => (
@@ -3108,13 +2156,14 @@ export default function EnhancedAuditsPage() {
               <ModalHeader>
                 <div className="flex items-center gap-3">
                   <AlertTriangle className="w-6 h-6 text-danger" />
-                  <span>Confirm Audit Deletion</span>
+                  <span>Confirm Deletion</span>
                 </div>
               </ModalHeader>
+
               <ModalBody>
                 {selectedAudit && (
                   <div className="space-y-4">
-                    <p className="text-default-700">
+                    <p>
                       Are you sure you want to delete this audit? This action
                       cannot be undone.
                     </p>
@@ -3122,46 +2171,18 @@ export default function EnhancedAuditsPage() {
                     <Card className="border-danger-200 bg-danger-50">
                       <CardBody className="p-3">
                         <div className="font-medium text-danger-800">
-                          {selectedAudit.title}
+                          {safeString(selectedAudit.title)}
                         </div>
-                        <div className="text-sm text-danger-700 mt-1">
-                          ID: {selectedAudit.id} • Building:{" "}
-                          {selectedAudit.building_name_display}
-                        </div>
-                        <div className="text-sm text-danger-600 mt-1">
-                          Status: {getStatusConfig(selectedAudit.status).label}
+                        <div className="text-sm text-danger-700">
+                          ID: {selectedAudit.id} •{" "}
+                          {getStatusConfig(selectedAudit.status).label}
                         </div>
                       </CardBody>
                     </Card>
-
-                    {selectedAudit.status === "in_progress" && (
-                      <Card className="border-warning-200 bg-warning-50">
-                        <CardBody className="p-3">
-                          <div className="flex items-center gap-2 text-warning-800">
-                            <AlertTriangle className="w-4 h-4" />
-                            <span className="font-medium">Warning</span>
-                          </div>
-                          <div className="text-sm text-warning-700 mt-1">
-                            This audit is currently in progress. Deleting it
-                            will lose all progress and compliance data.
-                          </div>
-                        </CardBody>
-                      </Card>
-                    )}
-
-                    <div className="text-sm text-default-500">
-                      <strong>What will be deleted:</strong>
-                      <ul className="list-disc list-inside mt-1 space-y-1">
-                        <li>Audit schedule and timeline</li>
-                        <li>Progress tracking data</li>
-                        <li>Compliance assessment results</li>
-                        <li>Associated compliance checks</li>
-                        <li>Historical audit records</li>
-                      </ul>
-                    </div>
                   </div>
                 )}
               </ModalBody>
+
               <ModalFooter>
                 <Button variant="light" onPress={onClose}>
                   Cancel
@@ -3169,247 +2190,18 @@ export default function EnhancedAuditsPage() {
                 <Button
                   color="danger"
                   onPress={handleDeleteAudit}
-                  isLoading={submitting}
+                  isLoading={isSubmitting}
                   startContent={
-                    !submitting ? <Trash2 className="w-4 h-4" /> : null
+                    !isSubmitting ? <Trash2 className="w-4 h-4" /> : undefined
                   }
                 >
-                  {submitting ? "Deleting..." : "Delete Audit"}
+                  {isSubmitting ? "Deleting..." : "Delete Audit"}
                 </Button>
               </ModalFooter>
             </>
           )}
         </ModalContent>
       </Modal>
-
-      {/* ✅ PERFECT: Enhanced Development Debug Panel */}
-      {process.env.NODE_ENV === "development" && (
-        <Card className="bg-gray-50 border-dashed border-2 border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <h4 className="text-sm font-medium text-gray-600">
-              🐛 Enhanced API-Aligned Debug Panel v2.0
-            </h4>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="flat"
-                onPress={() =>
-                  console.log("🔍 Complete State:", {
-                    audits,
-                    buildings,
-                    users,
-                    filters,
-                    pagination,
-                    auditStatistics,
-                    formData,
-                    selectedAudit,
-                    complianceChecks,
-                    complianceStandards,
-                    loading,
-                    error,
-                    actionLoading,
-                  })
-                }
-              >
-                Log Full State
-              </Button>
-              <Button
-                size="sm"
-                variant="flat"
-                onPress={() =>
-                  console.log("🎯 API Alignment Check:", {
-                    apiUtilsAvailable: !!apiUtils,
-                    currentUser: apiUtils?.getCurrentUser(),
-                    isAuthenticated: apiUtils?.isAuthenticated(),
-                    tokenExpiry: apiUtils?.getTimeUntilExpiry(),
-                    buildingOptions: buildingSelectOptions.length,
-                    userOptions: userSelectOptions.length,
-                  })
-                }
-              >
-                API Status
-              </Button>
-              <Button
-                size="sm"
-                variant="flat"
-                onPress={() => loadAllData(true)}
-                startContent={<RefreshCw className="w-3 h-3" />}
-              >
-                Force Reload
-              </Button>
-            </div>
-          </CardHeader>
-          <CardBody className="text-xs space-y-3">
-            {/* State Overview */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <strong className="text-primary">Loading States:</strong>
-                <div>Main: {loading.toString()}</div>
-                <div>Refreshing: {refreshing.toString()}</div>
-                <div>Submitting: {submitting.toString()}</div>
-                <div>Compliance: {loadingCompliance.toString()}</div>
-              </div>
-
-              <div>
-                <strong className="text-success">Data Counts:</strong>
-                <div>Audits: {audits.length}</div>
-                <div>Buildings: {buildings.length}</div>
-                <div>Users: {users.length}</div>
-                <div>Compliance Checks: {complianceChecks.length}</div>
-              </div>
-
-              <div>
-                <strong className="text-warning">Pagination:</strong>
-                <div>
-                  Page: {pagination.current_page}/{pagination.total_pages}
-                </div>
-                <div>Per page: {pagination.per_page}</div>
-                <div>Total: {pagination.total_count}</div>
-                <div>Has next: {pagination.has_next_page.toString()}</div>
-              </div>
-
-              <div>
-                <strong className="text-secondary">Active Filters:</strong>
-                <div>Search: {filters.search ? "✓" : "✗"}</div>
-                <div>Building: {filters.building_id ? "✓" : "✗"}</div>
-                <div>Type: {filters.audit_type ? "✓" : "✗"}</div>
-                <div>Status: {filters.status ? "✓" : "✗"}</div>
-                <div>Auditor: {filters.auditor_id ? "✓" : "✗"}</div>
-                <div>
-                  Date Range:{" "}
-                  {filters.date_range_start || filters.date_range_end
-                    ? "✓"
-                    : "✗"}
-                </div>
-              </div>
-            </div>
-
-            {/* Statistics */}
-            <div className="pt-2 border-t border-gray-200">
-              <strong className="text-purple-600">Computed Statistics:</strong>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-1">
-                <div>Total: {auditStatistics.total}</div>
-                <div>In Progress: {auditStatistics.in_progress}</div>
-                <div>Completed: {auditStatistics.completed}</div>
-                <div>Overdue: {auditStatistics.overdue}</div>
-                <div>Due Soon: {auditStatistics.due_soon}</div>
-                <div>
-                  Avg Compliance:{" "}
-                  {auditStatistics.avg_compliance_score.toFixed(1)}%
-                </div>
-                <div>
-                  Avg Progress: {auditStatistics.avg_progress.toFixed(1)}%
-                </div>
-                <div>Cancelled: {auditStatistics.cancelled}</div>
-              </div>
-            </div>
-
-            {/* Error State */}
-            {error && (
-              <div className="pt-2 border-t border-red-200">
-                <strong className="text-red-600">Current Error:</strong>
-                <div className="text-red-500 bg-red-50 p-2 rounded mt-1">
-                  {error}
-                </div>
-              </div>
-            )}
-
-            {/* Modal States */}
-            <div className="pt-2 border-t border-blue-200">
-              <strong className="text-blue-600">Modal States:</strong>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-1">
-                <div>Create: {isCreateOpen.toString()}</div>
-                <div>Edit: {isEditOpen.toString()}</div>
-                <div>View: {isViewOpen.toString()}</div>
-                <div>Delete: {isDeleteOpen.toString()}</div>
-                <div>
-                  Selected: {selectedAudit ? `ID ${selectedAudit.id}` : "None"}
-                </div>
-              </div>
-            </div>
-
-            {/* API Alignment Features */}
-            <div className="pt-2 border-t border-green-200">
-              <strong className="text-green-600">
-                ✅ API Alignment Features:
-              </strong>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-1 mt-1 text-green-700">
-                <div>✅ Server field transformation</div>
-                <div>✅ Enhanced error handling</div>
-                <div>✅ Proper response extraction</div>
-                <div>✅ Validation error mapping</div>
-                <div>✅ Pagination handling</div>
-                <div>✅ Filter parameter alignment</div>
-                <div>✅ Compliance data integration</div>
-                <div>✅ Action state management</div>
-                <div>✅ Real-time status updates</div>
-                <div>✅ Comprehensive CRUD operations</div>
-                <div>✅ Enhanced UI/UX patterns</div>
-                <div>✅ Performance optimizations</div>
-              </div>
-            </div>
-
-            {/* Performance Metrics */}
-            <div className="pt-2 border-t border-orange-200">
-              <strong className="text-orange-600">
-                🚀 Performance Features:
-              </strong>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-1 mt-1 text-orange-700">
-                <div>✅ useMemo for computed values</div>
-                <div>✅ useCallback for functions</div>
-                <div>✅ Proper dependency management</div>
-                <div>✅ Conditional rendering</div>
-                <div>✅ Loading state isolation</div>
-                <div>✅ Error boundary patterns</div>
-                <div>✅ Efficient re-renders</div>
-                <div>✅ Component memoization</div>
-                <div>✅ Data normalization</div>
-                <div>✅ Action debouncing</div>
-                <div>✅ Progressive loading</div>
-                <div>✅ Memory optimization</div>
-              </div>
-            </div>
-
-            {/* Current Form Data */}
-            {(isCreateOpen || isEditOpen) && (
-              <div className="pt-2 border-t border-purple-200">
-                <strong className="text-purple-600">📝 Form Data:</strong>
-                <div className="bg-purple-50 p-2 rounded mt-1 text-purple-700">
-                  <div>Title: "{formData.title}"</div>
-                  <div>Building ID: {formData.building_id || "None"}</div>
-                  <div>Auditor ID: {formData.auditor_id || "None"}</div>
-                  <div>Type: {formData.audit_type}</div>
-                  <div>Start: {formData.planned_start_date || "Not set"}</div>
-                  <div>End: {formData.planned_end_date || "Not set"}</div>
-                  <div>
-                    Duration: {formData.estimated_duration_hours || "Not set"}h
-                  </div>
-                  <div>Errors: {Object.keys(formErrors).length}</div>
-                </div>
-              </div>
-            )}
-
-            {/* API Version & Compatibility */}
-            <div className="pt-2 border-t border-indigo-200">
-              <strong className="text-indigo-600">🔗 API Integration:</strong>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-1 text-indigo-700">
-                <div>Version: Enhanced v2.0</div>
-                <div>Environment: {process.env.NODE_ENV}</div>
-                <div>
-                  Authentication: {apiUtils?.isAuthenticated() ? "✓" : "✗"}
-                </div>
-                <div>
-                  User Role: {apiUtils?.getCurrentUser()?.role || "Unknown"}
-                </div>
-                <div>
-                  Token Status: {apiUtils?.getTimeUntilExpiry() || "Unknown"}
-                </div>
-                <div>Last Updated: {new Date().toLocaleTimeString()}</div>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-      )}
     </div>
   );
 }

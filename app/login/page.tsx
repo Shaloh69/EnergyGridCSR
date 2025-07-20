@@ -24,19 +24,20 @@ import {
   Building,
   BarChart3,
   AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 
-// API and Types
-import { authAPI, apiUtils } from "@/lib/api";
+// ✅ FIXED: Use the proper hooks and utilities from your API setup
+import { useAuth } from "@/hooks/useApi";
 import { extractErrorMessage } from "@/lib/api-utils";
 import { API_ERROR_CODES } from "@/lib/api-config";
-import type { LoginCredentials, ApiError } from "@/types/api-types";
+import type { ApiError } from "@/types/api-types";
 
-// ✅ FIXED: Proper TypeScript interfaces aligned with API
+// ✅ FIXED: Simplified form data structure aligned with API
 interface LoginFormData {
   email: string;
   password: string;
-  remember_me: boolean; // ✅ Match server field name
+  rememberMe: boolean; // ✅ Keep in camelCase for client, API handles transformation
 }
 
 interface FormErrors {
@@ -45,20 +46,17 @@ interface FormErrors {
   general?: string;
 }
 
-interface ValidationError {
-  field: string;
-  message: string;
-  value?: any;
-}
-
 export default function LoginPage() {
   const router = useRouter();
 
-  // ✅ FIXED: Form state with proper server field alignment
+  // ✅ FIXED: Use the useAuth hook for proper state management
+  const { user, isAuthenticated, login: loginWithCredentials } = useAuth();
+
+  // ✅ FIXED: Simplified form state
   const [formData, setFormData] = useState<LoginFormData>({
     email: "",
     password: "",
-    remember_me: false, // ✅ Server expects snake_case
+    rememberMe: false,
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -66,31 +64,13 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
 
-  // ✅ FIXED: Check if user is already authenticated on mount
+  // ✅ FIXED: Check authentication status using the hook
   useEffect(() => {
-    const checkAuthStatus = () => {
-      try {
-        if (apiUtils.isAuthenticated()) {
-          console.log("✅ User already authenticated, redirecting to admin...");
-          router.push("/admin");
-          return;
-        }
-
-        // ✅ Check for expired tokens and clean up
-        const expiryTime = apiUtils.getTokenExpiryTime();
-        if (expiryTime && expiryTime < Date.now()) {
-          console.log("🧹 Cleaning up expired tokens...");
-          apiUtils.resetClientState();
-        }
-      } catch (error) {
-        console.warn("⚠️ Auth check failed:", error);
-        // Clean up any corrupted state
-        apiUtils.resetClientState();
-      }
-    };
-
-    checkAuthStatus();
-  }, [router]);
+    if (isAuthenticated && user) {
+      console.log("✅ User already authenticated, redirecting to admin...");
+      router.push("/admin");
+    }
+  }, [isAuthenticated, user, router]);
 
   const toggleVisibility = () => setIsVisible(!isVisible);
 
@@ -120,9 +100,9 @@ export default function LoginPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  // ✅ FIXED: Enhanced error handling using api-utils
+  // ✅ FIXED: Enhanced error handling using your api-utils
   const handleApiError = (error: any): void => {
-    console.error("❌ API Error Details:", {
+    console.error("❌ Login Error Details:", {
       status: error?.response?.status,
       data: error?.response?.data,
       message: error?.message,
@@ -132,21 +112,16 @@ export default function LoginPage() {
       const status = error.response.status;
       const errorData = error.response.data as ApiError;
 
-      // ✅ Handle validation errors properly
-      if (status === 400 && errorData?.validation_errors) {
+      // ✅ Handle validation errors properly (already transformed by API)
+      if (status === 422 && errorData?.validationErrors) {
         const validationErrors: FormErrors = {};
-        errorData.validation_errors.forEach((err: ValidationError) => {
-          // Map server field names to form field names
-          const fieldMap: Record<string, keyof FormErrors> = {
-            email: "email",
-            password: "password",
-          };
-
-          const formField = fieldMap[err.field] || "general";
-          if (formField === "general") {
-            validationErrors.general = err.message;
-          } else {
+        errorData.validationErrors.forEach((err) => {
+          // Fields are already in camelCase after transformation
+          const formField = err.field as keyof FormErrors;
+          if (formField === "email" || formField === "password") {
             validationErrors[formField] = err.message;
+          } else {
+            validationErrors.general = err.message;
           }
         });
         setErrors(validationErrors);
@@ -154,7 +129,7 @@ export default function LoginPage() {
       }
 
       // ✅ Handle specific error codes from api-config.ts
-      switch (errorData?.error_code) {
+      switch (errorData?.errorCode) {
         case API_ERROR_CODES.AUTHENTICATION_FAILED:
           setErrors({ general: "Invalid email or password" });
           break;
@@ -185,7 +160,7 @@ export default function LoginPage() {
     }
   };
 
-  // ✅ FIXED: Main form submission with proper API alignment
+  // ✅ FIXED: Main form submission using the useAuth hook
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
 
@@ -195,69 +170,43 @@ export default function LoginPage() {
       setIsLoading(true);
       setErrors({}); // Clear previous errors
 
-      console.log("🚀 Starting login process with data:", {
+      console.log("🚀 Starting login process with:", {
         email: formData.email,
-        remember_me: formData.remember_me,
+        rememberMe: formData.rememberMe,
       });
 
-      // ✅ FIXED: Create proper LoginCredentials object matching API expectations
-      const credentials: LoginCredentials = {
-        email: formData.email.trim(),
-        password: formData.password,
-        remember_me: formData.remember_me, // ✅ Server expects snake_case
-      };
-
-      // ✅ Call API with proper credentials structure
-      const response = await authAPI.login(
-        credentials.email,
-        credentials.password
+      // ✅ FIXED: Use the loginWithCredentials from useAuth hook
+      // The hook handles all token storage and state management
+      const response = await loginWithCredentials(
+        formData.email.trim(),
+        formData.password
       );
 
       console.log("✅ Login response received:", {
         success: response.data.success,
-        hasData: !!response.data.data,
         hasUser: !!response.data.data?.user,
-        hasTokens: !!(
-          response.data.data?.access_token && response.data.data?.refresh_token
-        ),
       });
 
-      if (response.data.success && response.data.data) {
-        console.log(
-          "✅ Login successful, user:",
-          response.data.data.user?.email
-        );
-
-        // ✅ Verify tokens are stored properly
-        setTimeout(() => {
-          if (apiUtils.isAuthenticated()) {
-            console.log("✅ Authentication verified, redirecting...");
-            router.push("/admin");
-          } else {
-            console.error("❌ Authentication failed after login");
-            setErrors({ general: "Authentication failed. Please try again." });
-            setIsLoading(false);
-          }
-        }, 100);
+      if (response.data.success && response.data.data?.user) {
+        console.log("✅ Login successful, redirecting...");
+        // The useAuth hook will update isAuthenticated state
+        // and the useEffect will handle the redirect
+        router.push("/admin");
       } else {
-        console.error("❌ Login failed - server returned success: false");
+        console.error("❌ Login failed - invalid response");
         setErrors({
-          general:
-            response.data.message ||
-            "Login failed. Please check your credentials.",
+          general: response.data.message || "Login failed. Please try again.",
         });
       }
     } catch (error: any) {
+      console.error("❌ Login error:", error);
       handleApiError(error);
     } finally {
-      // Only set loading to false if we're not redirecting
-      if (!apiUtils.isAuthenticated()) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   };
 
-  // ✅ FIXED: Demo login with proper form submission flow
+  // ✅ FIXED: Demo login using the same pattern
   const handleDemoLogin = async (): Promise<void> => {
     try {
       setIsDemoLoading(true);
@@ -265,34 +214,23 @@ export default function LoginPage() {
 
       console.log("🎯 Starting demo login...");
 
-      // ✅ Set demo credentials and trigger validation
-      const demoFormData: LoginFormData = {
-        email: "demo@energygrid.com",
-        password: "demo123",
-        remember_me: false,
-      };
+      // ✅ Set demo credentials and use the same login flow
+      const demoEmail = "demo@energygrid.com";
+      const demoPassword = "demo123";
 
-      setFormData(demoFormData);
+      // Update form data for visual feedback
+      setFormData({
+        email: demoEmail,
+        password: demoPassword,
+        rememberMe: false,
+      });
 
-      // ✅ Use the same login flow as manual form submission
-      const response = await authAPI.login(
-        demoFormData.email,
-        demoFormData.password
-      );
+      // Use the same login method as manual form submission
+      const response = await loginWithCredentials(demoEmail, demoPassword);
 
-      if (response.data.success && response.data.data) {
-        console.log("✅ Demo login successful");
-
-        setTimeout(() => {
-          if (apiUtils.isAuthenticated()) {
-            router.push("/admin");
-          } else {
-            setErrors({
-              general: "Demo authentication failed. Please try again.",
-            });
-            setIsDemoLoading(false);
-          }
-        }, 100);
+      if (response.data.success && response.data.data?.user) {
+        console.log("✅ Demo login successful, redirecting...");
+        router.push("/admin");
       } else {
         setErrors({
           general:
@@ -304,9 +242,7 @@ export default function LoginPage() {
       console.error("❌ Demo login error:", error);
       handleApiError(error);
     } finally {
-      if (!apiUtils.isAuthenticated()) {
-        setIsDemoLoading(false);
-      }
+      setIsDemoLoading(false);
     }
   };
 
@@ -445,6 +381,22 @@ export default function LoginPage() {
                   </div>
                 )}
 
+                {/* ✅ Success message for demo credential display */}
+                {formData.email === "demo@energygrid.com" &&
+                  !errors.general && (
+                    <div className="p-3 rounded-lg bg-success/10 border border-success/20 flex items-start gap-2">
+                      <CheckCircle className="w-4 h-4 text-success mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-success text-sm font-medium">
+                          Demo Credentials Loaded
+                        </p>
+                        <p className="text-success text-sm">
+                          Ready to sign in with demo account
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                 {/* ✅ Email Input with proper validation */}
                 <Input
                   type="email"
@@ -454,8 +406,8 @@ export default function LoginPage() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, email: e.target.value }))
                   }
-                  onBlur={() => {
-                    // Clear email error when user starts typing
+                  onFocus={() => {
+                    // Clear email error when user focuses
                     if (errors.email) {
                       setErrors((prev) => ({ ...prev, email: undefined }));
                     }
@@ -484,8 +436,8 @@ export default function LoginPage() {
                       password: e.target.value,
                     }))
                   }
-                  onBlur={() => {
-                    // Clear password error when user starts typing
+                  onFocus={() => {
+                    // Clear password error when user focuses
                     if (errors.password) {
                       setErrors((prev) => ({ ...prev, password: undefined }));
                     }
@@ -517,12 +469,12 @@ export default function LoginPage() {
                 />
 
                 <div className="flex items-center justify-between">
-                  {/* ✅ FIXED: Remember me checkbox with proper server field alignment */}
+                  {/* ✅ FIXED: Remember me checkbox (client-side preference) */}
                   <Checkbox
                     size="sm"
-                    isSelected={formData.remember_me}
+                    isSelected={formData.rememberMe}
                     onValueChange={(checked) =>
-                      setFormData((prev) => ({ ...prev, remember_me: checked }))
+                      setFormData((prev) => ({ ...prev, rememberMe: checked }))
                     }
                     isDisabled={isAnyLoading}
                     classNames={{
@@ -633,15 +585,14 @@ export default function LoginPage() {
                 <div>Environment: {process.env.NODE_ENV}</div>
                 <div>
                   Auth Status:{" "}
-                  {apiUtils.isAuthenticated()
+                  {isAuthenticated
                     ? "✅ Authenticated"
                     : "❌ Not Authenticated"}
                 </div>
-                <div>Token Expiry: {apiUtils.getTimeUntilExpiry()}</div>
                 <div>
-                  LocalStorage Available:{" "}
-                  {apiUtils.isLocalStorageAvailable() ? "✅" : "❌"}
+                  User: {user ? `${user.firstName} ${user.lastName}` : "None"}
                 </div>
+                <div>User Role: {user?.role || "None"}</div>
               </div>
             </div>
           )}

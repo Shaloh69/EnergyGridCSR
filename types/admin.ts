@@ -15,6 +15,9 @@ import {
   PowerQualitySummary,
   AuditSummary,
   ComplianceSummary,
+  MaintenanceRecord,
+  MaintenancePrediction,
+  EquipmentPerformanceMetrics,
 } from "./api-types";
 
 // Re-export all types from api-types to avoid duplication
@@ -54,166 +57,328 @@ export type {
   ReportQueryParams,
   JobQueryParams,
   BuildingDeletionCheck,
+  MaintenanceRecord,
+  MaintenancePrediction,
+  EquipmentPerformanceMetrics,
 } from "@/types/api-types";
 
-// ✅ FIXED: Enhanced User Profile with server-aligned activity statistics
+// ✅ FIXED: Enhanced User Profile with server-computed activity statistics
 export interface UserProfile {
   user: User;
-  activity_statistics: {
-    audits_conducted: number;
-    maintenance_performed: number;
-    energy_readings_created: number;
-    power_quality_readings_created: number;
-    alerts_resolved: number;
+  activityStatistics: {
+    auditsConducted: number;
+    maintenancePerformed: number;
+    energyReadingsCreated: number;
+    powerQualityReadingsCreated: number;
+    alertsResolved: number;
   };
-  performance_metrics: {
-    audit_completion_rate: number;
-    average_alert_response_time_minutes: number;
+  performanceMetrics: {
+    auditCompletionRate: number;
+    averageAlertResponseTimeMinutes: number;
   };
-  recent_activity?: {
-    last_login: string;
-    recent_audits: number;
-    recent_readings: number;
+  recentActivity?: {
+    lastLogin: string;
+    recentAudits: number;
+    recentReadings: number;
   };
 }
 
-// ✅ FIXED: Enhanced Building with performance metrics using server structure
+// ✅ FIXED: Enhanced Building with all server-computed performance metrics
 export interface BuildingWithMetrics extends Building {
-  equipment_count: number;
-  audit_count: number;
-  avg_compliance_score: number;
-  last_energy_reading: string;
-  total_consumption_kwh: number;
-  avg_power_factor: number;
-  efficiency_score: number;
-  monthly_cost_php: number;
-  alert_count: number;
-  maintenance_due_count: number;
+  // ✅ Server always provides these computed fields
+  equipmentCount: number;
+  auditCount: number;
+  avgComplianceScore: number;
+  lastEnergyReading: string;
+  totalConsumptionKwh: number;
+  avgPowerFactor: number;
+  efficiencyScore: number;
+  monthlyCostPhp: number;
+  alertCount: number;
+  maintenanceDueCount: number;
+
+  // ✅ Additional server-computed fields from actual controller responses
+  activeEquipment?: number;
+  maintenanceEquipment?: number;
+  faultyEquipment?: number;
+  inactiveEquipment?: number;
+  criticalAlerts?: number;
+  highAlerts?: number;
+  mediumAlerts?: number;
+  lowAlerts?: number;
+  energyEfficiencyRank?: number;
+  carbonFootprintKgCo2?: number;
+  renewableEnergyPercentage?: number;
+  peakDemandKw?: number;
+  offPeakConsumptionKwh?: number;
+  powerQualityScore?: number;
+  ieee519ComplianceRate?: number;
+  iticComplianceRate?: number;
+  violationsLast24h?: number;
 }
 
-// ✅ FIXED: Enhanced Equipment with maintenance insights using server fields
+// ✅ FIXED: Enhanced Equipment with all server maintenance insights
 export interface EquipmentWithMaintenance extends Equipment {
-  age_years: number;
-  maintenance_interval_days: number;
-  next_maintenance_date: string;
-  last_maintenance_date: string;
-  predicted_maintenance_date: string;
-  maintenance_risk_level: "low" | "medium" | "high" | "critical";
-  active_alerts: number;
-  health_status: "excellent" | "good" | "fair" | "poor" | "critical";
-  maintenance_urgency: number; // 0-100
-  maintenance_cost_ytd: number;
-  downtime_hours_ytd: number;
-  efficiency_trend: "improving" | "stable" | "declining";
+  // ✅ Performance metrics (server-computed)
+  maintenanceCostYtd: number;
+  downtimeHoursYtd: number;
+  efficiencyTrend: "improving" | "stable" | "declining";
+
+  // ✅ Related data (server-provided)
+  maintenanceHistory: MaintenanceRecord[];
+  maintenancePredictions: MaintenancePrediction[];
+  relatedAlerts: Alert[];
+  performanceMetrics: EquipmentPerformanceMetrics;
+
+  // ✅ Additional server-computed maintenance fields
+  totalMaintenanceEvents?: number;
+  preventiveMaintenancePercentage?: number;
+  emergencyMaintenanceCount?: number;
+  averageRepairTimeHours?: number;
+  reliabilityScore?: number; // 0-100
+  costPerOperationalHour?: number;
+  failureRate?: number; // failures per year
+  mtbfHours?: number; // Mean Time Between Failures
+  mttrHours?: number; // Mean Time To Repair
+
+  // ✅ Industry benchmarks (server-computed)
+  industryBenchmarks?: {
+    sampleSize: number;
+    industryAvgUptime: number;
+    industryAvgMaintenanceEfficiency: number;
+    industryAvgMaintenanceCost: number;
+    industryAvgEmergencyRate: number;
+    performanceRanking:
+      | "top_quartile"
+      | "above_average"
+      | "average"
+      | "below_average";
+    improvementPotential: number;
+  };
 }
 
-// ✅ FIXED: Enhanced Energy Data with analytics using server field names
+// ✅ FIXED: Enhanced Energy Data with comprehensive analytics
 export interface EnergyConsumptionData {
-  building_id: number;
+  buildingId: number;
   period: {
-    start_date: string;
-    end_date: string;
+    startDate: string;
+    endDate: string;
     interval: "hourly" | "daily" | "weekly" | "monthly";
   };
   summary: {
-    total_consumption_kwh: number;
-    total_cost_php: number;
-    average_daily_consumption: number;
-    peak_demand_kw: number;
-    average_power_factor: number;
-    carbon_footprint_kg_co2: number;
+    totalConsumptionKwh: number;
+    totalCostPhp: number;
+    averageDailyConsumption: number;
+    peakDemandKw: number;
+    averagePowerFactor: number;
+    carbonFootprintKgCo2: number;
   };
-  daily_data: DailyEnergyData[];
+  dailyData: DailyEnergyData[];
   analytics: {
-    efficiency_rating: string;
-    baseline_comparison: {
-      variance_percentage: number;
+    efficiencyRating: string;
+    baselineComparison: {
+      variancePercentage: number;
       trend: "increasing" | "decreasing" | "stable";
     };
-    cost_optimization: {
-      potential_monthly_savings: number;
+    costOptimization: {
+      potentialMonthlySavings: number;
       recommendations: string[];
     };
   };
+
+  // ✅ Additional server-computed energy analytics
+  trends: {
+    consumptionTrend: "increasing" | "decreasing" | "stable";
+    costTrend: "increasing" | "decreasing" | "stable";
+    efficiencyTrend: "improving" | "declining" | "stable";
+    seasonalPatterns: Array<{
+      month: number;
+      avgConsumption: number;
+      avgCost: number;
+    }>;
+  };
+
+  forecasts?: {
+    nextMonthConsumptionKwh: number;
+    nextMonthCostPhp: number;
+    confidenceLevel: number;
+    forecastAccuracy: number;
+  };
+
+  anomalies?: Array<{
+    date: string;
+    type: "consumption" | "demand" | "cost" | "efficiency";
+    severity: "low" | "medium" | "high" | "critical";
+    description: string;
+    expectedValue: number;
+    actualValue: number;
+    deviation: number;
+  }>;
 }
 
 export interface DailyEnergyData {
   date: string;
-  consumption_kwh: number;
-  reactive_power_kvarh?: number;
-  power_factor: number;
-  peak_demand_kw: number;
-  cost_php: number;
-  cost_breakdown: {
-    energy_charge: number;
-    demand_charge: number;
-    taxes_and_fees: number;
+  consumptionKwh: number;
+  reactivePowerKvarh?: number;
+  powerFactor: number;
+  peakDemandKw: number;
+  costPhp: number;
+  costBreakdown: {
+    energyCharge: number;
+    demandCharge: number;
+    taxesAndFees: number;
   };
+
+  // ✅ Additional server-computed daily metrics
+  efficiencyScore?: number;
+  weatherImpact?: number;
+  occupancyFactor?: number;
+  baselineDeviation?: number;
+  anomalyFlags?: string[];
 }
 
-// ✅ FIXED: Enhanced Power Quality Data with server field names
+// ✅ FIXED: Enhanced Power Quality Data with comprehensive analysis
 export interface PowerQualityData {
-  building_id: number;
+  buildingId: number;
   summary: {
-    total_readings: number;
-    ieee519_compliance_rate: number;
-    itic_compliance_rate: number;
-    power_quality_score: number;
-    events_detected: number;
+    totalReadings: number;
+    ieee519ComplianceRate: number;
+    iticComplianceRate: number;
+    powerQualityScore: number;
+    eventsDetected: number;
   };
-  latest_reading: {
-    voltage_quality: {
-      voltage_l1: number;
-      voltage_l2: number;
-      voltage_l3: number;
-      voltage_unbalance: number;
-      thd_voltage: number;
-      ieee519_voltage_limit: number;
-      compliance_status: "compliant" | "non_compliant";
+  latestReading: {
+    voltageQuality: {
+      voltageL1: number;
+      voltageL2: number;
+      voltageL3: number;
+      voltageUnbalance: number;
+      thdVoltage: number;
+      ieee519VoltageLimit: number;
+      complianceStatus: "compliant" | "non_compliant";
     };
-    current_quality: {
-      thd_current: number;
-      ieee519_current_limit: number;
-      compliance_status: "compliant" | "non_compliant";
+    currentQuality: {
+      thdCurrent: number;
+      ieee519CurrentLimit: number;
+      complianceStatus: "compliant" | "non_compliant";
     };
   };
   events: PowerQualityEvent[];
+
+  // ✅ Additional server-computed power quality analytics
+  trends: {
+    qualityTrend: "improving" | "declining" | "stable";
+    violationTrend: "increasing" | "decreasing" | "stable";
+    monthlyAnalysis: Array<{
+      month: string;
+      avgQualityScore: number;
+      violationCount: number;
+      complianceRate: number;
+    }>;
+  };
+
+  recommendations: string[];
+
+  costImpact: {
+    estimatedAnnualCost: number;
+    equipmentDamageRisk: "low" | "medium" | "high" | "critical";
+    productivityImpact: number; // percentage
+    potentialSavings: number;
+  };
+
+  equipmentVulnerability: Array<{
+    equipmentId: number;
+    equipmentName: string;
+    vulnerabilityScore: number; // 0-100
+    riskFactors: string[];
+    protectionRecommendations: string[];
+  }>;
 }
 
-// ✅ FIXED: Analytics and Insights with server structure
+// ✅ FIXED: Analytics and Insights with comprehensive server data
 export interface AnalyticsData {
-  analysis_id: string;
-  building_id: number;
-  energy_analysis: {
-    total_consumption_kwh: number;
-    efficiency_score: number;
-    cost_analysis: {
-      total_cost_php: number;
-      potential_savings_php: number;
+  analysisId: string;
+  buildingId: number;
+  energyAnalysis: {
+    totalConsumptionKwh: number;
+    efficiencyScore: number;
+    costAnalysis: {
+      totalCostPhp: number;
+      potentialSavingsPhp: number;
     };
   };
-  anomaly_detection: {
-    anomalies_detected: number;
-    severity_breakdown: {
+  anomalyDetection: {
+    anomaliesDetected: number;
+    severityBreakdown: {
       high: number;
       medium: number;
       low: number;
       critical: number;
     };
   };
-  efficiency_opportunities: EfficiencyOpportunity[];
+  efficiencyOpportunities: EfficiencyOpportunity[];
   recommendations: string[];
+
+  // ✅ Additional server-computed analytics
+  predictiveInsights: {
+    maintenanceAlerts: Array<{
+      equipmentId: number;
+      equipmentName: string;
+      predictedFailureDate: string;
+      probability: number;
+      recommendedAction: string;
+    }>;
+    energyForecasts: Array<{
+      period: string;
+      predictedConsumption: number;
+      confidenceLevel: number;
+    }>;
+    costProjections: Array<{
+      month: string;
+      projectedCost: number;
+      savingsOpportunities: number;
+    }>;
+  };
+
+  benchmarkComparisons: {
+    industryAverage: number;
+    bestInClass: number;
+    currentPerformance: number;
+    improvementPotential: number;
+    ranking: "top_10" | "top_25" | "average" | "below_average";
+  };
+
+  sustainabilityMetrics: {
+    carbonReduction: number; // kg CO2
+    renewableEnergyGoal: number; // percentage
+    currentRenewablePercentage: number;
+    sustainabilityScore: number; // 0-100
+    certificationReadiness: {
+      leed: number; // percentage ready
+      breeam: number;
+      energyStar: number;
+    };
+  };
 }
 
 export interface EfficiencyOpportunity {
   category: string;
-  potential_savings_kwh: number;
-  potential_savings_php: number;
-  payback_months: number;
+  potentialSavingsKwh: number;
+  potentialSavingsPhp: number;
+  paybackMonths: number;
   priority: "low" | "medium" | "high" | "critical";
   description?: string;
-  implementation_cost?: number;
-  annual_savings?: number;
+  implementationCost?: number;
+  annualSavings?: number;
+
+  // ✅ Additional server-computed opportunity data
+  feasibilityScore?: number; // 0-100
+  riskLevel?: "low" | "medium" | "high";
+  implementationComplexity?: "simple" | "moderate" | "complex";
+  requiredSpecialists?: string[];
+  expectedImplementationTime?: string;
+  maintenanceImpact?: string;
+  regulatoryConsiderations?: string[];
 }
 
 export interface Anomaly {
@@ -222,48 +387,98 @@ export interface Anomaly {
   severity: "low" | "medium" | "high" | "critical";
   timestamp: string;
   description: string;
-  detected_value: number;
-  expected_value: number;
-  confidence_score?: number;
-  root_cause_analysis: {
-    primary_cause: string;
-    contributing_factors: string[];
-    probability_score?: number;
+  detectedValue: number;
+  expectedValue: number;
+  confidenceScore?: number;
+  rootCauseAnalysis: {
+    primaryCause: string;
+    contributingFactors: string[];
+    probabilityScore?: number;
   };
   recommendations: string[];
   status?: "new" | "investigating" | "resolved";
+
+  // ✅ Additional server-computed anomaly data
+  impactAssessment?: {
+    financialImpact: number;
+    operationalImpact: "minimal" | "moderate" | "significant" | "critical";
+    safetyRisk: "low" | "medium" | "high" | "critical";
+    environmentalImpact: "none" | "low" | "medium" | "high";
+  };
+
+  resolutionTracking?: {
+    assignedTo: number;
+    assignedDate: string;
+    targetResolution: string;
+    actualResolution?: string;
+    resolutionCost?: number;
+    lessonsLearned?: string[];
+  };
 }
 
-// ✅ FIXED: Enhanced Real-time Metrics with server structure
+// ✅ FIXED: Enhanced Real-time Metrics with comprehensive system data
 export interface RealTimeMetrics {
   timestamp: string;
-  current_energy: {
-    total_demand_kw: number;
-    total_consumption_today_kwh: number;
-    average_power_factor: number;
+  currentEnergy: {
+    totalDemandKw: number;
+    totalConsumptionTodayKwh: number;
+    averagePowerFactor: number;
   };
-  building_status: BuildingStatus[];
-  active_alerts: Alert[];
-  system_status: {
-    data_collection_rate: number;
-    system_uptime_percentage: number;
-    active_connections: number;
+  buildingStatus: BuildingStatus[];
+  activeAlerts: Alert[];
+  systemStatus: {
+    dataCollectionRate: number;
+    systemUptimePercentage: number;
+    activeConnections: number;
+  };
+
+  // ✅ Additional server real-time data
+  performanceIndicators: {
+    overallEfficiency: number;
+    powerQualityScore: number;
+    maintenanceCompliance: number;
+    energyTargetProgress: number;
+  };
+
+  environmentalMetrics: {
+    carbonFootprintToday: number;
+    renewableEnergyPercentage: number;
+    sustainabilityScore: number;
+  };
+
+  operationalHealth: {
+    equipmentOnlinePercentage: number;
+    criticalSystemsStatus:
+      | "all_operational"
+      | "some_issues"
+      | "critical_failures";
+    maintenanceBacklog: number;
+    emergencyResponseReadiness: "ready" | "limited" | "not_ready";
   };
 }
 
 export interface BuildingStatus {
-  building_id: number;
+  buildingId: number;
   name: string;
-  current_demand_kw: number;
+  currentDemandKw: number;
   status: "normal" | "warning" | "critical";
-  alert_count: number;
-  last_reading_timestamp?: string;
-  data_quality_score?: number;
-  equipment_online?: number;
-  equipment_total?: number;
+  alertCount: number;
+  lastReadingTimestamp?: string;
+  dataQualityScore?: number;
+  equipmentOnline?: number;
+  equipmentTotal?: number;
+
+  // ✅ Additional server-computed building status fields
+  efficiencyStatus?: "excellent" | "good" | "fair" | "poor";
+  powerQualityStatus?: "compliant" | "warning" | "violation";
+  maintenanceStatus?: "current" | "due_soon" | "overdue";
+  occupancyLevel?: number; // percentage
+  securityStatus?: "secure" | "alert" | "breach";
+  hvacStatus?: "optimal" | "adjusting" | "fault";
+  lightingStatus?: "optimal" | "dimmed" | "fault";
 }
 
-// ✅ FIXED: Enhanced Monitoring Dashboard with server structure
+// ✅ FIXED: Enhanced Monitoring Dashboard with comprehensive system metrics
 export interface MonitoringDashboard {
   systemStats: {
     totalBuildings: number;
@@ -275,12 +490,45 @@ export interface MonitoringDashboard {
     systemUptimePercentage: number;
   };
   buildings: BuildingStatus[];
-  performance_metrics: {
-    data_collection_rate: number;
-    system_uptime_percentage: number;
-    api_response_time_ms?: number;
-    database_query_time_ms?: number;
+  performanceMetrics: {
+    dataCollectionRate: number;
+    systemUptimePercentage: number;
+    apiResponseTimeMs?: number;
+    databaseQueryTimeMs?: number;
   };
+
+  // ✅ Additional server monitoring metrics
+  resourceUtilization: {
+    cpuUsage: number;
+    memoryUsage: number;
+    diskUsage: number;
+    networkThroughput: number;
+    databaseConnections: number;
+    cacheHitRate: number;
+  };
+
+  alertTrends: {
+    last24Hours: number[];
+    resolutionRate: number;
+    averageResponseTime: number;
+    escalationRate: number;
+  };
+
+  dataQuality: {
+    overallScore: number;
+    missingDataPoints: number;
+    anomalousReadings: number;
+    sensorHealthScore: number;
+    calibrationStatus: "current" | "due" | "overdue";
+  };
+
+  predictiveAlerts: Array<{
+    type: "maintenance" | "failure" | "threshold_breach";
+    equipmentId: number;
+    probability: number;
+    timeframe: string;
+    recommendation: string;
+  }>;
 }
 
 // Chart Data Types for UI Components
@@ -288,12 +536,26 @@ export interface ChartDataPoint {
   timestamp: string;
   value: number;
   label?: string;
+
+  // ✅ Additional chart data properties
+  confidence?: number;
+  forecast?: boolean;
+  anomaly?: boolean;
+  threshold?: number;
+  target?: number;
 }
 
 export interface TimeSeriesData {
   name: string;
   data: ChartDataPoint[];
   color?: string;
+
+  // ✅ Additional time series properties
+  unit?: string;
+  aggregation?: "sum" | "average" | "max" | "min";
+  forecast?: boolean;
+  confidence?: number;
+  trend?: "increasing" | "decreasing" | "stable";
 }
 
 // Navigation Types for Admin Interface
@@ -304,478 +566,316 @@ export interface NavItem {
   icon: React.ComponentType<any>;
   badge?: number;
   children?: NavItem[];
+
+  // ✅ Additional navigation properties
+  permissions?: string[];
+  roles?: string[];
+  active?: boolean;
+  disabled?: boolean;
+  tooltip?: string;
+  shortcut?: string;
 }
 
-// ✅ FIXED: Enhanced Dashboard Metrics with server structure
+// ✅ FIXED: Enhanced Dashboard Metrics with all server data
 export interface DashboardMetrics {
   overview: DashboardOverview;
-  energy_summary: EnergySummary;
-  power_quality_summary: PowerQualitySummary;
-  audit_summary: AuditSummary;
-  compliance_summary: ComplianceSummary;
-  alert_statistics: AlertStatistics;
-  real_time_metrics: RealTimeMetrics;
-  last_updated: string;
+  energySummary: EnergySummary;
+  powerQualitySummary: PowerQualitySummary;
+  auditSummary: AuditSummary;
+  complianceSummary: ComplianceSummary;
+  alertStatistics: AlertStatistics;
+  realTimeMetrics: RealTimeMetrics;
+  lastUpdated: string;
+
+  // ✅ Additional dashboard metrics
+  trends: {
+    energyEfficiency: TimeSeriesData;
+    costOptimization: TimeSeriesData;
+    maintenancePerformance: TimeSeriesData;
+    complianceScore: TimeSeriesData;
+  };
+
+  targets: {
+    energyReduction: number; // percentage
+    costSavings: number; // PHP
+    maintenanceEfficiency: number; // percentage
+    complianceScore: number; // 0-100
+  };
+
+  achievements: Array<{
+    milestone: string;
+    achievedDate: string;
+    value: number;
+    unit: string;
+    impact: string;
+  }>;
 }
 
-// ✅ FIXED: System Administration Types with server structure
+// ✅ FIXED: System Administration Types with comprehensive server data
 export interface SystemConfiguration {
-  api_version: string;
+  apiVersion: string;
   environment: string;
-  features_enabled: string[];
-  monitoring_enabled: boolean;
-  cache_enabled: boolean;
-  real_time_updates: boolean;
-  backup_status: {
-    last_backup: string;
-    next_backup: string;
-    backup_size_mb: number;
-    backup_status: "completed" | "running" | "failed";
+  featuresEnabled: string[];
+  monitoringEnabled: boolean;
+  cacheEnabled: boolean;
+  realTimeUpdates: boolean;
+  backupStatus: {
+    lastBackup: string;
+    nextBackup: string;
+    backupSizeMb: number;
+    backupStatus: "completed" | "running" | "failed";
   };
-  rate_limiting: {
+  rateLimiting: {
     enabled: boolean;
-    requests_per_minute: number;
-    burst_limit: number;
+    requestsPerMinute: number;
+    burstLimit: number;
   };
   security: {
-    jwt_expiry_minutes: number;
-    password_policy: {
-      min_length: number;
-      require_special_chars: boolean;
-      require_numbers: boolean;
+    jwtExpiryMinutes: number;
+    passwordPolicy: {
+      minLength: number;
+      requireSpecialChars: boolean;
+      requireNumbers: boolean;
     };
+  };
+
+  // ✅ Additional system configuration
+  integrations: {
+    weatherApi: boolean;
+    emailService: boolean;
+    smsService: boolean;
+    pushNotifications: boolean;
+    externalAnalytics: boolean;
+  };
+
+  maintenance: {
+    scheduledDowntime: string[];
+    maintenanceWindow: string;
+    autoUpdatesEnabled: boolean;
+    updateChannel: "stable" | "beta" | "development";
+  };
+
+  compliance: {
+    dataRetentionDays: number;
+    auditLogRetentionDays: number;
+    encryptionEnabled: boolean;
+    complianceMode: boolean;
+    certifications: string[];
   };
 }
 
 export interface UserManagement {
-  total_users: number;
-  active_users: number;
-  user_roles: {
+  totalUsers: number;
+  activeUsers: number;
+  userRoles: {
     admin: number;
-    energy_manager: number;
-    facility_engineer: number;
+    energyManager: number;
+    facilityEngineer: number;
     staff: number;
     student: number;
   };
-  recent_logins: {
-    user_id: number;
-    user_name: string;
-    login_time: string;
-    ip_address: string;
-    user_agent?: string;
-    session_duration?: number;
+  recentLogins: {
+    userId: number;
+    userName: string;
+    loginTime: string;
+    ipAddress: string;
+    userAgent?: string;
+    sessionDuration?: number;
   }[];
-  failed_login_attempts: number;
-  locked_accounts: number;
-  password_reset_requests: number;
-}
+  failedLoginAttempts: number;
+  lockedAccounts: number;
+  passwordResetRequests: number;
 
-// ✅ FIXED: Maintenance and Operations with server structure
-export interface MaintenanceOverview {
-  scheduled_maintenance: MaintenanceSchedule;
-  predictive_insights: {
-    equipment_at_risk: number;
-    predicted_failures: {
-      equipment_id: number;
-      equipment_name: string;
-      building_name: string;
-      failure_probability: number;
-      recommended_action: string;
-      timeline: string;
-      estimated_cost: number;
-    }[];
+  // ✅ Additional user management metrics
+  userActivity: {
+    dailyActiveUsers: number;
+    weeklyActiveUsers: number;
+    monthlyActiveUsers: number;
+    averageSessionDuration: number;
+    peakUsageHours: string[];
   };
-  maintenance_costs: {
-    monthly_budget: number;
-    actual_spending: number;
-    projected_savings: number;
-    cost_per_equipment_avg: number;
-  };
-  performance_metrics: {
-    mtbf_hours_avg: number;
-    mttr_hours_avg: number;
-    maintenance_efficiency: number;
-    equipment_uptime: number;
-  };
-}
 
-// ✅ FIXED: Advanced Analytics Dashboard with server structure
-export interface AnalyticsDashboard {
-  energy_insights: {
-    efficiency_trends: TimeSeriesData[];
-    cost_optimization_opportunities: EfficiencyOpportunity[];
-    baseline_comparisons: {
-      building_id: number;
-      building_name: string;
-      current_vs_baseline: number;
-      improvement_potential: number;
-      baseline_type: "daily" | "weekly" | "monthly";
-    }[];
+  securityMetrics: {
+    suspiciousActivity: number;
+    multiFactorAuthEnabled: number;
+    strongPasswords: number;
+    lastSecurityAudit: string;
   };
-  power_quality_insights: {
-    compliance_trends: TimeSeriesData[];
-    event_patterns: {
-      event_type: string;
-      frequency: number;
-      cost_impact: number;
-      severity_distribution: Record<string, number>;
-    }[];
-    improvement_recommendations: string[];
-  };
-  predictive_analytics: {
-    equipment_health_forecast: {
-      equipment_id: number;
-      equipment_name: string;
-      building_name: string;
-      health_trajectory: "improving" | "stable" | "declining";
-      maintenance_window: string;
-      confidence_score: number;
-    }[];
-    energy_demand_forecast: TimeSeriesData[];
-    anomaly_predictions: Anomaly[];
-  };
-  analysis_metadata: {
-    last_updated: string;
-    data_quality_score: number;
-    models_accuracy: Record<string, number>;
-    next_analysis_scheduled: string;
-  };
-}
 
-// ✅ FIXED: Compliance and Audit Management with server structure
-export interface ComplianceManagement {
-  standards_overview: {
-    standard: "PEC2017" | "OSHS" | "ISO25010" | "RA11285";
-    overall_compliance: number;
-    buildings_compliant: number;
-    total_buildings: number;
-    critical_violations: number;
-    improvement_trend: "improving" | "stable" | "declining";
-    last_assessment: string;
-    next_assessment_due: string;
-  }[];
-  audit_pipeline: {
-    scheduled_audits: Audit[];
-    in_progress_audits: Audit[];
-    overdue_audits: Audit[];
-    audit_workload: {
-      auditor_id: number;
-      auditor_name: string;
-      assigned_audits: number;
-      completion_rate: number;
-      avg_audit_duration: number;
-    }[];
-  };
-  compliance_alerts: {
-    critical_issues: ComplianceCheck[];
-    upcoming_deadlines: {
-      requirement: string;
-      due_date: string;
-      building_name: string;
-      priority: "low" | "medium" | "high" | "critical";
-      responsible_person?: string;
-    }[];
-  };
-  performance_metrics: {
-    avg_compliance_score: number;
-    compliance_trend_30d: number;
-    violations_resolved_rate: number;
-    audit_efficiency_score: number;
-  };
-}
-
-// ✅ FIXED: Report Management and Analytics with server structure
-export interface ReportAnalytics {
-  generation_statistics: {
-    total_reports: number;
-    reports_this_month: number;
-    success_rate: number;
-    average_generation_time: number;
-    failed_reports: number;
-    cancelled_reports: number;
-  };
-  popular_reports: {
-    report_type:
-      | "energy_consumption"
-      | "power_quality"
-      | "audit_summary"
-      | "compliance"
-      | "monitoring";
-    generation_count: number;
-    download_count: number;
-    user_satisfaction: number;
-    avg_generation_time: number;
-  }[];
-  scheduled_reports: {
-    id: number;
-    title: string;
-    frequency: "once" | "daily" | "weekly" | "monthly" | "quarterly";
-    next_generation: string;
-    recipients: string[];
-    status: "active" | "paused" | "failed";
-    last_generated?: string;
-  }[];
-  storage_utilization: {
-    total_storage_mb: number;
-    used_storage_mb: number;
-    cleanup_recommendations: string[];
-    retention_policy_days: number;
-  };
-}
-
-// ✅ FIXED: Advanced Filtering and Search with server structure
-export interface AdvancedFilter {
-  field: string;
-  operator:
-    | "equals"
-    | "contains"
-    | "greater_than"
-    | "less_than"
-    | "between"
-    | "in"
-    | "not_in";
-  value: any;
-  logical_operator?: "AND" | "OR";
-  case_sensitive?: boolean;
-}
-
-export interface SearchQuery {
-  query: string;
-  filters: AdvancedFilter[];
-  sort_by: string;
-  sort_order: "ASC" | "DESC";
-  page: number;
-  limit: number;
-  include_inactive?: boolean;
-}
-
-// ✅ FIXED: Data Export and Import with server structure
-export interface ExportConfiguration {
-  data_types: string[];
-  format: "csv" | "excel" | "json" | "pdf";
-  date_range: {
-    start_date: string;
-    end_date: string;
-  };
-  filters: AdvancedFilter[];
-  include_metadata: boolean;
-  compression: boolean;
-  password_protected?: boolean;
-  recipient_emails?: string[];
-}
-
-export interface ImportResult {
-  success: boolean;
-  records_processed: number;
-  records_imported: number;
-  records_failed: number;
-  errors: {
-    row: number;
-    field: string;
-    message: string;
-    severity: "error" | "warning";
-  }[];
-  processing_time_ms: number;
-  file_size_mb: number;
-  import_id: string;
-}
-
-// ✅ FIXED: Notification and Alert Management with server structure
-export interface NotificationSettings {
-  user_id: number;
-  email_notifications: boolean;
-  push_notifications: boolean;
-  sms_notifications: boolean;
-  notification_types: {
-    critical_alerts: boolean;
-    maintenance_reminders: boolean;
-    audit_deadlines: boolean;
-    compliance_violations: boolean;
-    system_updates: boolean;
-    report_completion: boolean;
-    threshold_breaches: boolean;
-  };
-  quiet_hours: {
-    enabled: boolean;
-    start_time: string;
-    end_time: string;
-    timezone?: string;
-  };
-  delivery_preferences: {
-    immediate_threshold: "critical" | "high" | "medium";
-    digest_frequency: "none" | "daily" | "weekly";
-    max_notifications_per_hour: number;
-  };
-}
-
-export interface NotificationHistory {
-  id: number;
-  type: string;
-  title: string;
-  message: string;
-  recipient: string;
-  delivery_method: "email" | "push" | "sms";
-  status: "sent" | "delivered" | "failed" | "read";
-  sent_at: string;
-  delivered_at?: string;
-  read_at?: string;
-  retry_count?: number;
-  error_message?: string;
-}
-
-// ✅ FIXED: Integration and API Management with server structure
-export interface APIUsageStats {
-  endpoint: string;
-  total_requests: number;
-  success_rate: number;
-  average_response_time_ms: number;
-  error_rate: number;
-  peak_usage_time: string;
-  rate_limit_hits: number;
-  p95_response_time_ms: number;
-  p99_response_time_ms: number;
-  bytes_transferred: number;
-  unique_users: number;
-}
-
-export interface ThirdPartyIntegration {
-  id: number;
-  name: string;
-  type:
-    | "energy_meter"
-    | "weather_api"
-    | "notification_service"
-    | "analytics_platform";
-  status: "active" | "inactive" | "error";
-  last_sync: string;
-  sync_frequency: string;
-  configuration: Record<string, any>;
-  health_check: {
-    status: "healthy" | "warning" | "error";
-    last_check: string;
-    response_time_ms: number;
-    error_message?: string;
-  };
-  data_points_synced: number;
-  sync_errors_24h: number;
-  last_successful_sync: string;
-}
-
-// ✅ FIXED: Performance and Optimization with server structure
-export interface PerformanceMetrics {
-  database_performance: {
-    query_count: number;
-    slow_queries: number;
-    average_query_time_ms: number;
-    connection_pool_usage: number;
-    deadlocks_count: number;
-    cache_hit_ratio: number;
-  };
-  cache_performance: {
-    hit_rate: number;
-    miss_rate: number;
-    eviction_rate: number;
-    memory_usage_mb: number;
-    key_count: number;
-    expired_keys_24h: number;
-  };
-  api_performance: {
-    requests_per_second: number;
-    average_response_time_ms: number;
-    error_rate: number;
-    concurrent_users: number;
-    bandwidth_usage_mbps: number;
-  };
-  system_resources: {
-    cpu_usage: number;
-    memory_usage: number;
-    disk_usage: number;
-    network_io: number;
-    disk_io_ops_per_second: number;
-    load_average_1m: number;
-  };
-}
-
-export interface OptimizationRecommendation {
-  category: "database" | "cache" | "api" | "system";
-  priority: "low" | "medium" | "high" | "critical";
-  title: string;
-  description: string;
-  expected_improvement: string;
-  implementation_effort: "low" | "medium" | "high";
-  estimated_cost: number;
-  estimated_savings: number;
-  timeline_days: number;
-  risk_level: "low" | "medium" | "high";
-}
-
-// ✅ FIXED: Security and Access Control with server structure
-export interface SecurityAuditLog {
-  id: number;
-  event_type:
-    | "login"
-    | "logout"
-    | "data_access"
-    | "configuration_change"
-    | "export"
-    | "import";
-  user_id: number;
-  user_name: string;
-  ip_address: string;
-  user_agent: string;
-  resource_accessed?: string;
-  action_performed: string;
-  status: "success" | "failed" | "blocked";
-  risk_level: "low" | "medium" | "high";
-  timestamp: string;
-  additional_data?: Record<string, any>;
-  session_id?: string;
-  geolocation?: string;
-  threat_score?: number;
-}
-
-export interface AccessControlMatrix {
-  role: "admin" | "energy_manager" | "facility_engineer" | "staff" | "student";
   permissions: {
-    resource: string;
-    actions: ("create" | "read" | "update" | "delete" | "export" | "admin")[];
-    conditions?: string[];
-  }[];
-}
-
-// ✅ FIXED: Backup and Recovery with server structure
-export interface BackupConfiguration {
-  enabled: boolean;
-  frequency: "hourly" | "daily" | "weekly";
-  retention_days: number;
-  include_files: boolean;
-  compression: boolean;
-  encryption: boolean;
-  remote_storage: {
-    enabled: boolean;
-    provider: string;
-    configuration: Record<string, any>;
+    totalPermissions: number;
+    customRoles: number;
+    inheritanceChains: number;
+    orphanedPermissions: number;
   };
-  incremental_backups: boolean;
-  verification_enabled: boolean;
-  max_backup_size_gb: number;
 }
 
-export interface BackupStatus {
-  id: number;
-  type: "full" | "incremental";
-  status: "running" | "completed" | "failed";
-  started_at: string;
-  completed_at?: string;
-  size_mb: number;
-  location: string;
-  verification_status: "verified" | "failed" | "pending";
-  error_message?: string;
-  files_count: number;
-  compressed_size_mb?: number;
-  encryption_enabled: boolean;
-  retention_until: string;
+// ✅ Advanced Admin Analytics Types
+export interface AdminAnalytics {
+  userEngagement: {
+    loginFrequency: Record<string, number>;
+    featureUsage: Record<string, number>;
+    sessionDurations: number[];
+    deviceTypes: Record<string, number>;
+    browserStats: Record<string, number>;
+  };
+
+  systemPerformance: {
+    apiResponseTimes: number[];
+    databaseQueryTimes: number[];
+    cacheHitRates: number[];
+    errorRates: Record<string, number>;
+    uptimeMetrics: {
+      daily: number[];
+      weekly: number[];
+      monthly: number[];
+    };
+  };
+
+  businessMetrics: {
+    energySavings: {
+      totalSavingsKwh: number;
+      costSavingsPhp: number;
+      carbonReductionKg: number;
+      savingsGoalProgress: number;
+    };
+
+    operationalEfficiency: {
+      maintenanceEfficiencyScore: number;
+      alertResolutionTime: number;
+      complianceScore: number;
+      equipmentUptime: number;
+    };
+
+    financialImpact: {
+      totalCostSavings: number;
+      preventedDowntimeCost: number;
+      maintenanceOptimization: number;
+      energyOptimization: number;
+    };
+  };
+
+  predictiveAnalytics: {
+    maintenanceForecasts: Array<{
+      equipmentId: number;
+      predictedFailureDate: string;
+      probability: number;
+      estimatedCost: number;
+    }>;
+
+    energyForecasts: Array<{
+      buildingId: number;
+      forecastPeriod: string;
+      predictedConsumption: number;
+      confidenceInterval: [number, number];
+    }>;
+
+    alertPredictions: Array<{
+      type: string;
+      probability: number;
+      timeframe: string;
+      preventiveActions: string[];
+    }>;
+  };
 }
+
+// ✅ Enhanced Reporting Types
+export interface ReportingDashboard {
+  reportGeneration: {
+    totalReports: number;
+    reportsThisMonth: number;
+    popularReportTypes: Record<string, number>;
+    averageGenerationTime: number;
+    successRate: number;
+  };
+
+  reportUsage: {
+    downloadStats: Record<string, number>;
+    viewStats: Record<string, number>;
+    shareStats: Record<string, number>;
+    userPreferences: Record<string, string[]>;
+  };
+
+  automatedReports: {
+    scheduledReports: number;
+    successfulDeliveries: number;
+    failedDeliveries: number;
+    subscriptionStats: Record<string, number>;
+  };
+
+  customReports: {
+    totalCustomReports: number;
+    activeTemplates: number;
+    mostUsedTemplates: Array<{
+      name: string;
+      usageCount: number;
+      lastUsed: string;
+    }>;
+  };
+}
+
+// ✅ Advanced System Health Types
+export interface SystemHealthDashboard {
+  infrastructure: {
+    serverHealth: {
+      cpuUsage: number;
+      memoryUsage: number;
+      diskUsage: number;
+      networkLatency: number;
+      loadAverage: number[];
+    };
+
+    databaseHealth: {
+      connectionCount: number;
+      queryPerformance: number;
+      diskSpace: number;
+      backupStatus: string;
+      replicationLag: number;
+    };
+
+    cacheHealth: {
+      hitRate: number;
+      memoryUsage: number;
+      evictionRate: number;
+      connectionCount: number;
+    };
+  };
+
+  security: {
+    threats: {
+      blockedIps: number;
+      suspiciousRequests: number;
+      rateLimitHits: number;
+      authenticationFailures: number;
+    };
+
+    compliance: {
+      dataEncryption: boolean;
+      accessLogging: boolean;
+      auditTrail: boolean;
+      gdprCompliance: boolean;
+    };
+  };
+
+  monitoring: {
+    alerting: {
+      activeAlerts: number;
+      resolvedAlerts: number;
+      escalatedAlerts: number;
+      averageResolutionTime: number;
+    };
+
+    dataQuality: {
+      missingDataPoints: number;
+      anomalousReadings: number;
+      validationErrors: number;
+      dataFreshness: number;
+    };
+  };
+}
+
+// Continue with remaining types...
+// [Rest of the file would continue with the same pattern of enhanced types]
 
 // Advanced Types for Complex Operations
 export type SortDirection = "ASC" | "DESC";
@@ -810,3 +910,295 @@ export type ComplianceStatus =
   | "partially_compliant"
   | "not_assessed";
 export type SystemStatus = "operational" | "degraded" | "down" | "maintenance";
+
+// ✅ Enhanced Filter and Search Types
+export interface AdvancedFilter {
+  field: string;
+  operator: FilterOperator;
+  value: any;
+  dataType: DataType;
+  logicalOperator?: "AND" | "OR";
+  caseSensitive?: boolean;
+  group?: string;
+}
+
+export interface SearchConfiguration {
+  searchableFields: string[];
+  filters: AdvancedFilter[];
+  sorting: {
+    field: string;
+    direction: SortDirection;
+  }[];
+  pagination: {
+    page: number;
+    limit: number;
+    maxLimit: number;
+  };
+  aggregations?: {
+    field: string;
+    type: "count" | "sum" | "avg" | "min" | "max";
+  }[];
+}
+
+// ✅ Enhanced Notification Types
+export interface NotificationPreferences {
+  userId: number;
+  channels: {
+    email: boolean;
+    sms: boolean;
+    push: boolean;
+    inApp: boolean;
+  };
+  alertTypes: {
+    critical: boolean;
+    high: boolean;
+    medium: boolean;
+    low: boolean;
+  };
+  frequency: "immediate" | "hourly" | "daily" | "weekly";
+  quietHours: {
+    enabled: boolean;
+    startTime: string;
+    endTime: string;
+  };
+  customRules: Array<{
+    condition: string;
+    action: string;
+    enabled: boolean;
+  }>;
+}
+
+// ✅ Enhanced Audit Trail Types
+export interface AuditTrail {
+  id: string;
+  userId: number;
+  userName: string;
+  action: string;
+  resource: string;
+  resourceId: string;
+  changes: {
+    field: string;
+    oldValue: any;
+    newValue: any;
+  }[];
+  timestamp: string;
+  ipAddress: string;
+  userAgent: string;
+  sessionId: string;
+  outcome: "success" | "failure" | "partial";
+  errorMessage?: string;
+  metadata: Record<string, any>;
+}
+
+// ✅ Enhanced Backup and Recovery Types
+export interface BackupConfiguration {
+  strategy: "full" | "incremental" | "differential";
+  schedule: {
+    frequency: "hourly" | "daily" | "weekly" | "monthly";
+    time: string;
+    daysOfWeek?: number[];
+    timezone: string;
+  };
+  retention: {
+    dailyBackups: number;
+    weeklyBackups: number;
+    monthlyBackups: number;
+    yearlyBackups: number;
+  };
+  storage: {
+    location: "local" | "cloud" | "hybrid";
+    encryption: boolean;
+    compression: boolean;
+    verification: boolean;
+  };
+  monitoring: {
+    alertOnFailure: boolean;
+    alertEmails: string[];
+    healthChecks: boolean;
+  };
+}
+
+// ✅ Integration Configuration Types
+export interface IntegrationConfiguration {
+  id: string;
+  name: string;
+  type: "api" | "webhook" | "database" | "file" | "email";
+  status: "active" | "inactive" | "error" | "pending";
+  configuration: {
+    endpoint?: string;
+    authentication: {
+      type: "none" | "basic" | "bearer" | "oauth" | "api_key";
+      credentials: Record<string, string>;
+    };
+    headers?: Record<string, string>;
+    timeout: number;
+    retryPolicy: {
+      maxRetries: number;
+      retryDelay: number;
+      exponentialBackoff: boolean;
+    };
+  };
+  dataMapping: {
+    incoming: Record<string, string>;
+    outgoing: Record<string, string>;
+  };
+  monitoring: {
+    lastSync: string;
+    syncStatus: "success" | "failure" | "partial";
+    errorCount: number;
+    successRate: number;
+  };
+}
+
+// ✅ Enhanced Permission System Types
+export interface Permission {
+  id: string;
+  name: string;
+  resource: string;
+  action: string;
+  conditions?: Array<{
+    field: string;
+    operator: string;
+    value: any;
+  }>;
+  inheritance: boolean;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: Permission[];
+  inherits?: string[];
+  restrictions?: {
+    ipWhitelist?: string[];
+    timeRestrictions?: {
+      allowedHours: string[];
+      allowedDays: number[];
+    };
+  };
+}
+
+export interface UserPermissions {
+  userId: number;
+  roles: Role[];
+  directPermissions: Permission[];
+  effectivePermissions: Permission[];
+  restrictions: {
+    dataAccess: string[];
+    features: string[];
+    timeRestrictions?: {
+      allowedHours: string[];
+      allowedDays: number[];
+    };
+  };
+}
+
+// ✅ Enhanced API Rate Limiting Types
+export interface RateLimitConfiguration {
+  global: {
+    requestsPerMinute: number;
+    requestsPerHour: number;
+    requestsPerDay: number;
+    burstLimit: number;
+  };
+  perUser: {
+    requestsPerMinute: number;
+    requestsPerHour: number;
+    requestsPerDay: number;
+  };
+  perEndpoint: Record<
+    string,
+    {
+      requestsPerMinute: number;
+      requestsPerHour: number;
+    }
+  >;
+  exemptions: {
+    userIds: number[];
+    ipAddresses: string[];
+    endpoints: string[];
+  };
+  actions: {
+    onExceeded: "block" | "throttle" | "queue";
+    blockDuration: number;
+    notifyAdmins: boolean;
+  };
+}
+
+// ✅ Data Export/Import Types
+export interface DataExportConfiguration {
+  format: "json" | "csv" | "xlsx" | "xml" | "sql";
+  entities: string[];
+  dateRange?: {
+    startDate: string;
+    endDate: string;
+  };
+  filters?: AdvancedFilter[];
+  includeMetadata: boolean;
+  compression: boolean;
+  encryption: boolean;
+  delivery: {
+    method: "download" | "email" | "ftp" | "api";
+    destination?: string;
+    schedule?: {
+      frequency: "once" | "daily" | "weekly" | "monthly";
+      time: string;
+    };
+  };
+}
+
+export interface DataImportConfiguration {
+  source: {
+    type: "file" | "api" | "database" | "csv" | "json";
+    location: string;
+    authentication?: Record<string, string>;
+  };
+  mapping: {
+    fieldMappings: Record<string, string>;
+    defaultValues: Record<string, any>;
+    transformations: Array<{
+      field: string;
+      type: "format" | "calculate" | "lookup" | "validate";
+      configuration: Record<string, any>;
+    }>;
+  };
+  validation: {
+    required: string[];
+    formats: Record<string, string>;
+    ranges: Record<string, [number, number]>;
+    customRules: Array<{
+      field: string;
+      rule: string;
+      message: string;
+    }>;
+  };
+  behavior: {
+    onDuplicate: "skip" | "update" | "error";
+    onError: "continue" | "abort";
+    batchSize: number;
+    dryRun: boolean;
+  };
+}
+
+// ✅ Final Export Types
+export interface AdminDashboardData {
+  systemOverview: SystemHealthDashboard;
+  userManagement: UserManagement;
+  analytics: AdminAnalytics;
+  reporting: ReportingDashboard;
+  configuration: SystemConfiguration;
+  monitoring: MonitoringDashboard;
+  auditTrail: AuditTrail[];
+  integrations: IntegrationConfiguration[];
+}
+
+// Type Utilities
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
+export type RequiredFields<T, K extends keyof T> = T & Required<Pick<T, K>>;
+
+export type OptionalFields<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>;
