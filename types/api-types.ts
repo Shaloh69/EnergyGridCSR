@@ -167,7 +167,6 @@ export interface MaintenanceRecord {
   scheduledDate?: string;
   completedDate?: string;
   downtimeMinutes?: number;
-  durationMinutes?: number;
   cost?: number;
   partsUsed?: string[];
   maintenanceNotes?: string;

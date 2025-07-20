@@ -30,11 +30,10 @@ import { Skeleton } from "@heroui/skeleton";
 import { Progress } from "@heroui/progress";
 import { Badge } from "@heroui/badge";
 import { Tabs, Tab } from "@heroui/tabs";
-import { Divider } from "@heroui/divider";
 import { Spinner } from "@heroui/spinner";
 import { Tooltip } from "@heroui/tooltip";
 
-// Icons - Import with proper fallbacks
+// Icons
 import {
   Settings,
   Plus,
@@ -111,7 +110,6 @@ const SafeIcon = ({
   className?: string;
   fallback?: any;
 }) => {
-  // Use fallback if IconComponent is undefined or null
   const Icon = IconComponent || fallback || HelpCircle;
 
   try {
@@ -122,7 +120,7 @@ const SafeIcon = ({
   }
 };
 
-// Equipment configuration with guaranteed fallbacks
+// Equipment configuration
 const equipmentTypeConfig = {
   hvac: {
     label: "HVAC",
@@ -192,7 +190,6 @@ const maintenanceScheduleConfig = {
   annually: { label: "Annually", interval: 365 },
 } as const;
 
-// Main component
 export default function EquipmentPage() {
   // Filter and pagination state
   const [searchTerm, setSearchTerm] = useState("");
@@ -275,39 +272,54 @@ export default function EquipmentPage() {
   });
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [submitLoading, setSubmitLoading] = useState(false);
 
-  // Build query parameters
-  const equipmentParams = useMemo(
-    (): EquipmentQueryParams => ({
+  // Build query parameters with proper dependency tracking
+  const equipmentParams = useMemo((): EquipmentQueryParams => {
+    const params: EquipmentQueryParams = {
       page: currentPage,
       limit: pageSize,
-      search: searchTerm || undefined,
-      buildingId: buildingFilter,
-      equipmentType: typeFilter,
-      status: statusFilter,
       sortBy: "name",
       sortOrder: "ASC",
-    }),
-    [
-      currentPage,
-      pageSize,
-      searchTerm,
-      buildingFilter,
-      typeFilter,
-      statusFilter,
-    ]
-  );
+    };
 
-  // API hooks
+    // Only add filters if they have values
+    if (searchTerm?.trim()) {
+      params.search = searchTerm.trim();
+    }
+    if (buildingFilter) {
+      params.buildingId = buildingFilter;
+    }
+    if (typeFilter) {
+      params.equipmentType = typeFilter;
+    }
+    if (statusFilter) {
+      params.status = statusFilter;
+    }
+
+    console.log("Equipment params:", params); // Debug logging
+    return params;
+  }, [
+    currentPage,
+    pageSize,
+    searchTerm,
+    buildingFilter,
+    typeFilter,
+    statusFilter,
+  ]);
+
+  // API hooks with proper dependency management
   const {
     data: equipment,
     pagination,
     loading: equipmentLoading,
     error: equipmentError,
     refresh: refreshEquipment,
+    execute: refetchEquipment,
   } = useEquipment(equipmentParams, {
     immediate: true,
-    cacheTtl: 5 * 60 * 1000, // 5 minutes cache
+    cacheTtl: 30000, // 30 seconds cache
+    dependencies: [equipmentParams], // Ensure refetch when params change
   });
 
   const {
@@ -332,7 +344,7 @@ export default function EquipmentPage() {
     { status: "active" },
     {
       immediate: true,
-      refreshInterval: 30 * 1000, // Refresh every 30 seconds
+      refreshInterval: 30 * 1000,
     }
   );
 
@@ -372,6 +384,18 @@ export default function EquipmentPage() {
     loading: mutationLoading,
     error: mutationError,
   } = useEquipmentMutation();
+
+  // Effect to reset page when filters change
+  useEffect(() => {
+    console.log("Filters changed, resetting to page 1");
+    setCurrentPage(1);
+  }, [searchTerm, buildingFilter, typeFilter, statusFilter]);
+
+  // Effect to refetch data when parameters change
+  useEffect(() => {
+    console.log("Parameters changed, refetching equipment...");
+    refetchEquipment();
+  }, [equipmentParams, refetchEquipment]);
 
   // Computed values
   const equipmentStats = useMemo(() => {
@@ -456,37 +480,71 @@ export default function EquipmentPage() {
     [alerts]
   );
 
-  // Form validation
+  // Enhanced form validation
   const validateForm = useCallback((): boolean => {
     const errors: Record<string, string> = {};
 
-    if (!formData.name.trim()) errors.name = "Equipment name is required";
-    if (!formData.buildingId) errors.buildingId = "Building is required";
-    if (!formData.manufacturer.trim())
+    // Required fields validation
+    if (!formData.name.trim()) {
+      errors.name = "Equipment name is required";
+    }
+    if (!formData.buildingId) {
+      errors.buildingId = "Building is required";
+    }
+    if (!formData.manufacturer.trim()) {
       errors.manufacturer = "Manufacturer is required";
-    if (!formData.model.trim()) errors.model = "Model is required";
-    if (!formData.location.trim()) errors.location = "Location is required";
+    }
+    if (!formData.model.trim()) {
+      errors.model = "Model is required";
+    }
+    if (!formData.location.trim()) {
+      errors.location = "Location is required";
+    }
 
-    // Numeric validation
-    if (formData.powerRatingKw && isNaN(Number(formData.powerRatingKw))) {
-      errors.powerRatingKw = "Power rating must be a valid number";
+    // Numeric validation with better error messages
+    if (formData.powerRatingKw) {
+      const powerRating = Number(formData.powerRatingKw);
+      if (isNaN(powerRating) || powerRating < 0) {
+        errors.powerRatingKw = "Power rating must be a positive number";
+      }
     }
-    if (formData.voltageRating && isNaN(Number(formData.voltageRating))) {
-      errors.voltageRating = "Voltage rating must be a valid number";
+
+    if (formData.voltageRating) {
+      const voltageRating = Number(formData.voltageRating);
+      if (isNaN(voltageRating) || voltageRating < 0) {
+        errors.voltageRating = "Voltage rating must be a positive number";
+      }
     }
-    if (formData.currentRatingA && isNaN(Number(formData.currentRatingA))) {
-      errors.currentRatingA = "Current rating must be a valid number";
+
+    if (formData.currentRatingA) {
+      const currentRating = Number(formData.currentRatingA);
+      if (isNaN(currentRating) || currentRating < 0) {
+        errors.currentRatingA = "Current rating must be a positive number";
+      }
     }
-    if (
-      formData.conditionScore &&
-      (isNaN(Number(formData.conditionScore)) ||
-        Number(formData.conditionScore) < 0 ||
-        Number(formData.conditionScore) > 100)
-    ) {
-      errors.conditionScore = "Condition score must be between 0 and 100";
+
+    if (formData.conditionScore) {
+      const conditionScore = Number(formData.conditionScore);
+      if (isNaN(conditionScore) || conditionScore < 0 || conditionScore > 100) {
+        errors.conditionScore = "Condition score must be between 0 and 100";
+      }
     }
-    if (formData.floor && isNaN(Number(formData.floor))) {
-      errors.floor = "Floor must be a valid number";
+
+    if (formData.floor) {
+      const floor = Number(formData.floor);
+      if (isNaN(floor)) {
+        errors.floor = "Floor must be a valid number";
+      }
+    }
+
+    // Date validation
+    if (formData.installationDate && formData.warrantyExpiry) {
+      const installDate = new Date(formData.installationDate);
+      const warrantyDate = new Date(formData.warrantyExpiry);
+      if (warrantyDate < installDate) {
+        errors.warrantyExpiry =
+          "Warranty expiry cannot be before installation date";
+      }
     }
 
     setFormErrors(errors);
@@ -518,19 +576,23 @@ export default function EquipmentPage() {
     setFormErrors({});
   }, []);
 
-  // CRUD operations
+  // Enhanced CRUD operations with proper error handling
   const handleCreate = useCallback(async () => {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      console.error("Form validation failed:", formErrors);
+      return;
+    }
 
+    setSubmitLoading(true);
     try {
       const equipmentData: Partial<Equipment> = {
-        name: formData.name,
-        code: formData.code || undefined,
+        name: formData.name.trim(),
+        code: formData.code.trim() || undefined,
         buildingId: Number(formData.buildingId),
         equipmentType: formData.equipmentType,
-        manufacturer: formData.manufacturer,
-        model: formData.model,
-        serialNumber: formData.serialNumber || undefined,
+        manufacturer: formData.manufacturer.trim(),
+        model: formData.model.trim(),
+        serialNumber: formData.serialNumber.trim() || undefined,
         powerRatingKw: formData.powerRatingKw
           ? Number(formData.powerRatingKw)
           : undefined,
@@ -542,26 +604,33 @@ export default function EquipmentPage() {
           : undefined,
         installationDate: formData.installationDate || undefined,
         warrantyExpiry: formData.warrantyExpiry || undefined,
-        location: formData.location,
+        location: formData.location.trim(),
         floor: formData.floor ? Number(formData.floor) : undefined,
-        room: formData.room || undefined,
+        room: formData.room.trim() || undefined,
         maintenanceSchedule: formData.maintenanceSchedule,
         conditionScore: formData.conditionScore
           ? Number(formData.conditionScore)
           : undefined,
-        notes: formData.notes || undefined,
+        notes: formData.notes.trim() || undefined,
       };
 
+      console.log("Creating equipment with data:", equipmentData);
       await createEquipment(equipmentData);
+
       onCreateClose();
       resetForm();
-      refreshEquipment();
+      await refreshEquipment();
+
+      console.log("Equipment created successfully");
     } catch (error) {
       console.error("Failed to create equipment:", error);
+    } finally {
+      setSubmitLoading(false);
     }
   }, [
     formData,
     validateForm,
+    formErrors,
     createEquipment,
     onCreateClose,
     resetForm,
@@ -569,17 +638,24 @@ export default function EquipmentPage() {
   ]);
 
   const handleEdit = useCallback(async () => {
-    if (!selectedEquipment || !validateForm()) return;
+    if (!selectedEquipment || !validateForm()) {
+      console.error("Edit validation failed:", {
+        selectedEquipment,
+        formErrors,
+      });
+      return;
+    }
 
+    setSubmitLoading(true);
     try {
       const equipmentData: Partial<Equipment> = {
-        name: formData.name,
-        code: formData.code || undefined,
+        name: formData.name.trim(),
+        code: formData.code.trim() || undefined,
         buildingId: Number(formData.buildingId),
         equipmentType: formData.equipmentType,
-        manufacturer: formData.manufacturer,
-        model: formData.model,
-        serialNumber: formData.serialNumber || undefined,
+        manufacturer: formData.manufacturer.trim(),
+        model: formData.model.trim(),
+        serialNumber: formData.serialNumber.trim() || undefined,
         powerRatingKw: formData.powerRatingKw
           ? Number(formData.powerRatingKw)
           : undefined,
@@ -591,27 +667,35 @@ export default function EquipmentPage() {
           : undefined,
         installationDate: formData.installationDate || undefined,
         warrantyExpiry: formData.warrantyExpiry || undefined,
-        location: formData.location,
+        location: formData.location.trim(),
         floor: formData.floor ? Number(formData.floor) : undefined,
-        room: formData.room || undefined,
+        room: formData.room.trim() || undefined,
         maintenanceSchedule: formData.maintenanceSchedule,
         conditionScore: formData.conditionScore
           ? Number(formData.conditionScore)
           : undefined,
-        notes: formData.notes || undefined,
+        notes: formData.notes.trim() || undefined,
       };
 
+      console.log("Updating equipment with data:", equipmentData);
       await updateEquipment(selectedEquipment.id, equipmentData);
+
       onEditClose();
       resetForm();
-      refreshEquipment();
+      setSelectedEquipment(null);
+      await refreshEquipment();
+
+      console.log("Equipment updated successfully");
     } catch (error) {
       console.error("Failed to update equipment:", error);
+    } finally {
+      setSubmitLoading(false);
     }
   }, [
     selectedEquipment,
     formData,
     validateForm,
+    formErrors,
     updateEquipment,
     onEditClose,
     resetForm,
@@ -620,12 +704,17 @@ export default function EquipmentPage() {
 
   const handleDelete = useCallback(
     async (equipmentItem: Equipment) => {
-      if (!confirm(`Are you sure you want to delete "${equipmentItem.name}"?`))
+      if (
+        !confirm(`Are you sure you want to delete "${equipmentItem.name}"?`)
+      ) {
         return;
+      }
 
       try {
+        console.log("Deleting equipment:", equipmentItem.id);
         await deleteEquipment(equipmentItem.id);
-        refreshEquipment();
+        await refreshEquipment();
+        console.log("Equipment deleted successfully");
       } catch (error) {
         console.error("Failed to delete equipment:", error);
       }
@@ -633,20 +722,24 @@ export default function EquipmentPage() {
     [deleteEquipment, refreshEquipment]
   );
 
-  // Modal handlers
+  // Enhanced modal handlers
   const openCreateModal = useCallback(() => {
     resetForm();
+    setSelectedEquipment(null);
     onCreateOpen();
   }, [resetForm, onCreateOpen]);
 
   const openEditModal = useCallback(
     (equipmentItem: Equipment) => {
+      console.log("Opening edit modal for equipment:", equipmentItem);
       setSelectedEquipment(equipmentItem);
+
+      // Populate form with current equipment data
       setFormData({
-        name: equipmentItem.name,
+        name: equipmentItem.name || "",
         code: equipmentItem.code || "",
-        buildingId: equipmentItem.buildingId.toString(),
-        equipmentType: equipmentItem.equipmentType,
+        buildingId: equipmentItem.buildingId?.toString() || "",
+        equipmentType: equipmentItem.equipmentType || "hvac",
         manufacturer: equipmentItem.manufacturer || "",
         model: equipmentItem.model || "",
         serialNumber: equipmentItem.serialNumber || "",
@@ -662,6 +755,9 @@ export default function EquipmentPage() {
         conditionScore: equipmentItem.conditionScore?.toString() || "",
         notes: equipmentItem.notes || "",
       });
+
+      // Clear any previous errors
+      setFormErrors({});
       onEditOpen();
     },
     [onEditOpen]
@@ -683,13 +779,45 @@ export default function EquipmentPage() {
     [onQROpen]
   );
 
-  // Filter handlers
+  // Enhanced filter handlers
   const clearFilters = useCallback(() => {
+    console.log("Clearing all filters");
     setSearchTerm("");
     setBuildingFilter(undefined);
     setTypeFilter(undefined);
     setStatusFilter(undefined);
     setCurrentPage(1);
+  }, []);
+
+  // Enhanced pagination handler
+  const handlePageChange = useCallback((page: number) => {
+    console.log("Changing to page:", page);
+    setCurrentPage(page);
+  }, []);
+
+  // Filter change handlers with proper state updates
+  const handleSearchChange = useCallback((value: string) => {
+    console.log("Search term changed:", value);
+    setSearchTerm(value);
+  }, []);
+
+  const handleBuildingFilterChange = useCallback((keys: Set<string>) => {
+    const key = Array.from(keys)[0];
+    const buildingId = key ? Number(key) : undefined;
+    console.log("Building filter changed:", buildingId);
+    setBuildingFilter(buildingId);
+  }, []);
+
+  const handleTypeFilterChange = useCallback((keys: Set<string>) => {
+    const key = Array.from(keys)[0] as Equipment["equipmentType"] | undefined;
+    console.log("Type filter changed:", key);
+    setTypeFilter(key);
+  }, []);
+
+  const handleStatusFilterChange = useCallback((keys: Set<string>) => {
+    const key = Array.from(keys)[0] as Equipment["status"] | undefined;
+    console.log("Status filter changed:", key);
+    setStatusFilter(key);
   }, []);
 
   // Helper function to safely get configuration
@@ -713,6 +841,27 @@ export default function EquipmentPage() {
       }
     );
   }, []);
+
+  // Debug logging
+  useEffect(() => {
+    console.log("Equipment page state:", {
+      equipmentLoading,
+      equipment: equipment?.length,
+      pagination,
+      currentPage,
+      equipmentParams,
+      errors: { equipmentError, buildingsError, mutationError },
+    });
+  }, [
+    equipmentLoading,
+    equipment,
+    pagination,
+    currentPage,
+    equipmentParams,
+    equipmentError,
+    buildingsError,
+    mutationError,
+  ]);
 
   // Loading state
   if (equipmentLoading && (!equipment || equipment.length === 0)) {
@@ -896,33 +1045,33 @@ export default function EquipmentPage() {
         </Card>
       </div>
 
-      {/* Filters */}
+      {/* Enhanced Filters */}
       <Card>
         <CardBody>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
             <Input
               placeholder="Search equipment..."
               value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => handleSearchChange(e.target.value)}
               startContent={<Search className="w-4 h-4 text-default-400" />}
               className="col-span-2"
+              isClearable
+              onClear={() => handleSearchChange("")}
             />
 
             <Select
               placeholder="Building"
               selectedKeys={buildingFilter ? [buildingFilter.toString()] : []}
-              onSelectionChange={(keys) => {
-                const key = Array.from(keys)[0] as string;
-                setBuildingFilter(key ? Number(key) : undefined);
-                setCurrentPage(1);
-              }}
+              onSelectionChange={(keys) =>
+                handleBuildingFilterChange(keys as Set<string>)
+              }
               isLoading={buildingsLoading}
             >
               {buildings?.map((building) => (
-                <SelectItem key={building.id.toString()}>
+                <SelectItem
+                  key={building.id.toString()}
+                  description={building.id.toString()}
+                >
                   {building.name}
                 </SelectItem>
               ))}
@@ -931,14 +1080,12 @@ export default function EquipmentPage() {
             <Select
               placeholder="Type"
               selectedKeys={typeFilter ? [typeFilter] : []}
-              onSelectionChange={(keys) => {
-                const key = Array.from(keys)[0] as Equipment["equipmentType"];
-                setTypeFilter(key);
-                setCurrentPage(1);
-              }}
+              onSelectionChange={(keys) =>
+                handleTypeFilterChange(keys as Set<string>)
+              }
             >
               {Object.entries(equipmentTypeConfig).map(([key, config]) => (
-                <SelectItem key={key}>
+                <SelectItem key={key} description={key}>
                   <div className="flex items-center">
                     <SafeIcon
                       IconComponent={config?.icon}
@@ -954,14 +1101,12 @@ export default function EquipmentPage() {
             <Select
               placeholder="Status"
               selectedKeys={statusFilter ? [statusFilter] : []}
-              onSelectionChange={(keys) => {
-                const key = Array.from(keys)[0] as Equipment["status"];
-                setStatusFilter(key);
-                setCurrentPage(1);
-              }}
+              onSelectionChange={(keys) =>
+                handleStatusFilterChange(keys as Set<string>)
+              }
             >
               {Object.entries(statusConfig).map(([key, config]) => (
-                <SelectItem key={key}>
+                <SelectItem key={key} description={key}>
                   <div className="flex items-center">
                     <SafeIcon
                       IconComponent={config?.icon}
@@ -1219,7 +1364,7 @@ export default function EquipmentPage() {
             </TableBody>
           </Table>
 
-          {/* Pagination */}
+          {/* Enhanced Pagination */}
           {pagination && pagination.totalPages > 1 && (
             <div className="flex justify-between items-center p-4">
               <div className="text-sm text-default-500">
@@ -1234,9 +1379,10 @@ export default function EquipmentPage() {
               <Pagination
                 total={pagination.totalPages}
                 page={pagination.currentPage}
-                onChange={setCurrentPage}
+                onChange={handlePageChange}
                 showControls
                 showShadow
+                size="sm"
               />
             </div>
           )}
@@ -1249,6 +1395,8 @@ export default function EquipmentPage() {
         onOpenChange={isCreateOpen ? onCreateClose : onEditClose}
         size="4xl"
         scrollBehavior="inside"
+        isDismissable={!submitLoading}
+        hideCloseButton={submitLoading}
       >
         <ModalContent>
           {(onClose) => (
@@ -1257,6 +1405,7 @@ export default function EquipmentPage() {
                 <div className="flex items-center">
                   <Settings className="w-5 h-5 mr-2" />
                   {isCreateOpen ? "Add New Equipment" : "Edit Equipment"}
+                  {submitLoading && <Spinner size="sm" className="ml-2" />}
                 </div>
               </ModalHeader>
               <ModalBody className="space-y-4">
@@ -1271,6 +1420,7 @@ export default function EquipmentPage() {
                     errorMessage={formErrors.name}
                     isInvalid={!!formErrors.name}
                     isRequired
+                    isDisabled={submitLoading}
                   />
 
                   <Input
@@ -1282,6 +1432,7 @@ export default function EquipmentPage() {
                     }
                     errorMessage={formErrors.code}
                     isInvalid={!!formErrors.code}
+                    isDisabled={submitLoading}
                   />
                 </div>
 
@@ -1303,9 +1454,13 @@ export default function EquipmentPage() {
                     isInvalid={!!formErrors.buildingId}
                     isRequired
                     isLoading={buildingsLoading}
+                    isDisabled={submitLoading}
                   >
                     {buildings?.map((building) => (
-                      <SelectItem key={building.id.toString()}>
+                      <SelectItem
+                        key={building.id.toString()}
+                        description={building.id.toString()}
+                      >
                         {building.name} ({building.code || `ID: ${building.id}`}
                         )
                       </SelectItem>
@@ -1325,10 +1480,11 @@ export default function EquipmentPage() {
                       }));
                     }}
                     isRequired
+                    isDisabled={submitLoading}
                   >
                     {Object.entries(equipmentTypeConfig).map(
                       ([key, config]) => (
-                        <SelectItem key={key}>
+                        <SelectItem key={key} description={key}>
                           <div className="flex items-center">
                             <SafeIcon
                               IconComponent={config?.icon}
@@ -1357,6 +1513,7 @@ export default function EquipmentPage() {
                     errorMessage={formErrors.manufacturer}
                     isInvalid={!!formErrors.manufacturer}
                     isRequired
+                    isDisabled={submitLoading}
                   />
 
                   <Input
@@ -1372,6 +1529,7 @@ export default function EquipmentPage() {
                     errorMessage={formErrors.model}
                     isInvalid={!!formErrors.model}
                     isRequired
+                    isDisabled={submitLoading}
                   />
                 </div>
 
@@ -1388,6 +1546,7 @@ export default function EquipmentPage() {
                     }
                     errorMessage={formErrors.serialNumber}
                     isInvalid={!!formErrors.serialNumber}
+                    isDisabled={submitLoading}
                   />
 
                   <Select
@@ -1404,10 +1563,13 @@ export default function EquipmentPage() {
                         maintenanceSchedule: key || "monthly",
                       }));
                     }}
+                    isDisabled={submitLoading}
                   >
                     {Object.entries(maintenanceScheduleConfig).map(
                       ([key, config]) => (
-                        <SelectItem key={key}>{config.label}</SelectItem>
+                        <SelectItem key={key} description={key}>
+                          {config.label}
+                        </SelectItem>
                       )
                     )}
                   </Select>
@@ -1419,6 +1581,7 @@ export default function EquipmentPage() {
                     placeholder="0.0"
                     type="number"
                     step="0.1"
+                    min="0"
                     value={formData.powerRatingKw}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -1428,12 +1591,14 @@ export default function EquipmentPage() {
                     }
                     errorMessage={formErrors.powerRatingKw}
                     isInvalid={!!formErrors.powerRatingKw}
+                    isDisabled={submitLoading}
                   />
 
                   <Input
                     label="Voltage Rating (V)"
                     placeholder="220"
                     type="number"
+                    min="0"
                     value={formData.voltageRating}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -1443,6 +1608,7 @@ export default function EquipmentPage() {
                     }
                     errorMessage={formErrors.voltageRating}
                     isInvalid={!!formErrors.voltageRating}
+                    isDisabled={submitLoading}
                   />
 
                   <Input
@@ -1450,6 +1616,7 @@ export default function EquipmentPage() {
                     placeholder="10"
                     type="number"
                     step="0.1"
+                    min="0"
                     value={formData.currentRatingA}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -1459,6 +1626,7 @@ export default function EquipmentPage() {
                     }
                     errorMessage={formErrors.currentRatingA}
                     isInvalid={!!formErrors.currentRatingA}
+                    isDisabled={submitLoading}
                   />
                 </div>
 
@@ -1473,6 +1641,7 @@ export default function EquipmentPage() {
                         installationDate: e.target.value,
                       }))
                     }
+                    isDisabled={submitLoading}
                   />
 
                   <Input
@@ -1485,6 +1654,9 @@ export default function EquipmentPage() {
                         warrantyExpiry: e.target.value,
                       }))
                     }
+                    errorMessage={formErrors.warrantyExpiry}
+                    isInvalid={!!formErrors.warrantyExpiry}
+                    isDisabled={submitLoading}
                   />
                 </div>
 
@@ -1502,12 +1674,14 @@ export default function EquipmentPage() {
                     errorMessage={formErrors.location}
                     isInvalid={!!formErrors.location}
                     isRequired
+                    isDisabled={submitLoading}
                   />
 
                   <Input
                     label="Floor"
                     placeholder="Floor number"
                     type="number"
+                    min="0"
                     value={formData.floor}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -1517,6 +1691,7 @@ export default function EquipmentPage() {
                     }
                     errorMessage={formErrors.floor}
                     isInvalid={!!formErrors.floor}
+                    isDisabled={submitLoading}
                   />
 
                   <Input
@@ -1526,6 +1701,7 @@ export default function EquipmentPage() {
                     onChange={(e) =>
                       setFormData((prev) => ({ ...prev, room: e.target.value }))
                     }
+                    isDisabled={submitLoading}
                   />
                 </div>
 
@@ -1544,6 +1720,7 @@ export default function EquipmentPage() {
                   }
                   errorMessage={formErrors.conditionScore}
                   isInvalid={!!formErrors.conditionScore}
+                  isDisabled={submitLoading}
                 />
 
                 <Textarea
@@ -1554,22 +1731,28 @@ export default function EquipmentPage() {
                     setFormData((prev) => ({ ...prev, notes: e.target.value }))
                   }
                   minRows={3}
+                  isDisabled={submitLoading}
                 />
               </ModalBody>
               <ModalFooter>
-                <Button variant="light" onPress={onClose}>
+                <Button
+                  variant="light"
+                  onPress={onClose}
+                  isDisabled={submitLoading}
+                >
                   Cancel
                 </Button>
                 <Button
                   color="primary"
                   onPress={isCreateOpen ? handleCreate : handleEdit}
-                  isLoading={mutationLoading}
+                  isLoading={submitLoading}
                   startContent={
-                    isCreateOpen ? (
+                    !submitLoading &&
+                    (isCreateOpen ? (
                       <Plus className="w-4 h-4" />
                     ) : (
                       <Edit className="w-4 h-4" />
-                    )
+                    ))
                   }
                 >
                   {isCreateOpen ? "Create Equipment" : "Update Equipment"}

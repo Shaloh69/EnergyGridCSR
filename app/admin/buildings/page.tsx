@@ -85,8 +85,8 @@ import type {
   Audit,
 } from "@/types/api-types";
 
-// Form interface for building creation/editing
-interface BuildingFormData {
+// Form interface for room creation/editing
+interface RoomFormData {
   name: string;
   code: string;
   areaSqm: number;
@@ -98,15 +98,13 @@ interface BuildingFormData {
   address: string;
 }
 
-const BuildingsPage: React.FC = () => {
+const RoomsPage: React.FC = () => {
   // ✅ Authentication check
   const { isAuthenticated, user } = useAuth();
 
   // ✅ View and selection state
   const [viewMode, setViewMode] = useState<"list" | "details">("list");
-  const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(
-    null
-  );
+  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
   const [selectedTab, setSelectedTab] = useState("overview");
 
   // ✅ Search and filter state
@@ -118,7 +116,7 @@ const BuildingsPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
 
   // ✅ Form state
-  const [buildingForm, setBuildingForm] = useState<BuildingFormData>({
+  const [roomForm, setRoomForm] = useState<RoomFormData>({
     name: "",
     code: "",
     areaSqm: 0,
@@ -150,8 +148,8 @@ const BuildingsPage: React.FC = () => {
   // ✅ Success message state
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // ✅ Build query parameters for buildings list
-  const buildingsParams = useMemo(
+  // ✅ Build query parameters for rooms list
+  const roomsParams = useMemo(
     (): BuildingQueryParams => ({
       page: currentPage,
       limit: 20,
@@ -164,15 +162,15 @@ const BuildingsPage: React.FC = () => {
     [currentPage, searchQuery, statusFilter, typeFilter, sortBy, sortOrder]
   );
 
-  // ✅ FIXED: API Hooks - Buildings list with proper error handling
+  // ✅ FIXED: API Hooks - Rooms list with proper error handling
   const {
-    data: buildings = [], // ✅ Default to empty array
+    data: rooms = [], // ✅ Default to empty array
     pagination,
-    loading: buildingsLoading,
-    error: buildingsError,
-    refresh: refreshBuildings,
-    isError: buildingsIsError,
-  } = useBuildings(buildingsParams, {
+    loading: roomsLoading,
+    error: roomsError,
+    refresh: refreshRooms,
+    isError: roomsIsError,
+  } = useBuildings(roomsParams, {
     immediate: true,
     dependencies: [
       searchQuery,
@@ -184,91 +182,91 @@ const BuildingsPage: React.FC = () => {
     ],
   });
 
-  // ✅ Individual building details (only when selected)
+  // ✅ Individual room details (only when selected)
   const {
-    data: selectedBuilding,
-    loading: buildingLoading,
-    error: buildingError,
-    refresh: refreshBuilding,
-    isError: buildingIsError,
-  } = useBuilding(selectedBuildingId!, {
-    immediate: !!selectedBuildingId,
+    data: selectedRoom,
+    loading: roomLoading,
+    error: roomError,
+    refresh: refreshRoom,
+    isError: roomIsError,
+  } = useBuilding(selectedRoomId!, {
+    immediate: !!selectedRoomId,
   });
 
-  // ✅ FIXED: Building equipment with proper error handling
+  // ✅ FIXED: Room equipment with proper error handling
   const {
-    data: buildingEquipment = [], // ✅ Default to empty array
+    data: roomEquipment = [], // ✅ Default to empty array
     loading: equipmentLoading,
     error: equipmentError,
     isError: equipmentIsError,
   } = useEquipment(
-    { buildingId: selectedBuildingId! },
+    { buildingId: selectedRoomId! },
     {
-      immediate: !!selectedBuildingId,
+      immediate: !!selectedRoomId,
     }
   );
 
-  // ✅ Energy statistics (only when building is selected)
+  // ✅ Energy statistics (only when room is selected)
   const {
     data: energyStats,
     loading: energyStatsLoading,
     error: energyStatsError,
     isError: energyStatsIsError,
-  } = useEnergyStats(selectedBuildingId!, undefined, {
-    immediate: !!selectedBuildingId,
+  } = useEnergyStats(selectedRoomId!, undefined, {
+    immediate: !!selectedRoomId,
   });
 
-  // ✅ Power quality statistics (only when building is selected)
+  // ✅ Power quality statistics (only when room is selected)
   const {
     data: powerQualityStats,
     loading: powerQualityLoading,
     error: powerQualityStatsError,
     isError: powerQualityStatsIsError,
-  } = usePowerQualityStats(selectedBuildingId!, undefined, {
-    immediate: !!selectedBuildingId,
+  } = usePowerQualityStats(selectedRoomId!, undefined, {
+    immediate: !!selectedRoomId,
   });
 
-  // ✅ FIXED: Building audits with proper error handling
+  // ✅ FIXED: Room audits with proper error handling
   const {
-    data: buildingAudits = [], // ✅ Default to empty array
+    data: roomAudits = [], // ✅ Default to empty array
     loading: auditsLoading,
     error: auditsError,
     isError: auditsIsError,
   } = useAudits(
-    { buildingId: selectedBuildingId! },
+    { buildingId: selectedRoomId! },
     {
-      immediate: !!selectedBuildingId,
+      immediate: !!selectedRoomId,
     }
   );
 
-  // ✅ FIXED: Building alerts with proper error handling
+  // ✅ FIXED: Room alerts with proper error handling
   const {
-    data: buildingAlerts = [], // ✅ Default to empty array
+    data: roomAlerts = [], // ✅ Default to empty array
     loading: alertsLoading,
     error: alertsError,
     isError: alertsIsError,
   } = useAlerts(
-    { buildingId: selectedBuildingId!, limit: 50 },
+    { buildingId: selectedRoomId!, limit: 50 },
     {
-      immediate: !!selectedBuildingId,
+      immediate: !!selectedRoomId,
     }
   );
 
-  // ✅ Maintenance schedule (only when building is selected)
+  // ✅ Maintenance schedule (only when room is selected)
   const {
     data: maintenanceSchedule,
     loading: maintenanceLoading,
     error: maintenanceError,
     isError: maintenanceIsError,
-  } = useMaintenanceSchedule(selectedBuildingId!, {
-    immediate: !!selectedBuildingId,
+  } = useMaintenanceSchedule(selectedRoomId!, {
+    immediate: !!selectedRoomId,
   });
 
-  // ✅ Building mutations
+  // ✅ Room mutations
   const {
-    createBuilding,
-    updateBuilding,
-    deleteBuilding,
+    createBuilding: createRoom,
+    updateBuilding: updateRoom,
+    deleteBuilding: deleteRoom,
     loading: mutationLoading,
     error: mutationError,
   } = useBuildingMutation();
@@ -301,21 +299,21 @@ const BuildingsPage: React.FC = () => {
   }, [onCreateOpen]);
 
   const handleEditOpen = useCallback(() => {
-    if (selectedBuilding) {
+    if (selectedRoom) {
       prepareEditForm();
       onEditOpen();
     }
-  }, [selectedBuilding, onEditOpen]);
+  }, [selectedRoom, onEditOpen]);
 
-  const handleBuildingSelect = useCallback((building: BuildingType) => {
-    setSelectedBuildingId(building.id);
+  const handleRoomSelect = useCallback((room: BuildingType) => {
+    setSelectedRoomId(room.id);
     setViewMode("details");
     setSelectedTab("overview");
   }, []);
 
   const handleBackToList = useCallback(() => {
     setViewMode("list");
-    setSelectedBuildingId(null);
+    setSelectedRoomId(null);
     setSelectedTab("overview");
   }, []);
 
@@ -323,34 +321,34 @@ const BuildingsPage: React.FC = () => {
     async (isEdit: boolean = false) => {
       try {
         // ✅ Validate required fields
-        if (!buildingForm.name.trim() || !buildingForm.code.trim()) {
+        if (!roomForm.name.trim() || !roomForm.code.trim()) {
           return;
         }
 
         // ✅ Transform form data to server format
         const submitData = {
-          name: buildingForm.name.trim(),
-          code: buildingForm.code.trim(),
-          description: buildingForm.description?.trim() || "",
-          address: buildingForm.address?.trim() || "",
-          areaSqm: Number(buildingForm.areaSqm) || 0,
-          floors: Number(buildingForm.floors) || 1,
-          yearBuilt: Number(buildingForm.yearBuilt) || new Date().getFullYear(),
-          buildingType: buildingForm.buildingType,
-          status: buildingForm.status,
+          name: roomForm.name.trim(),
+          code: roomForm.code.trim(),
+          description: roomForm.description?.trim() || "",
+          address: roomForm.address?.trim() || "",
+          areaSqm: Number(roomForm.areaSqm) || 0,
+          floors: Number(roomForm.floors) || 1,
+          yearBuilt: Number(roomForm.yearBuilt) || new Date().getFullYear(),
+          buildingType: roomForm.buildingType,
+          status: roomForm.status,
         };
 
-        if (isEdit && selectedBuilding) {
-          await updateBuilding(selectedBuilding.id, submitData);
-          setSuccessMessage("Building updated successfully!");
+        if (isEdit && selectedRoom) {
+          await updateRoom(selectedRoom.id, submitData);
+          setSuccessMessage("Room updated successfully!");
           onEditClose();
-          await Promise.all([refreshBuildings(), refreshBuilding()]);
+          await Promise.all([refreshRooms(), refreshRoom()]);
         } else {
-          await createBuilding(submitData);
-          setSuccessMessage("Building created successfully!");
+          await createRoom(submitData);
+          setSuccessMessage("Room created successfully!");
           onCreateClose();
           resetForm();
-          await refreshBuildings();
+          await refreshRooms();
         }
       } catch (error) {
         console.error("Form submission failed:", error);
@@ -358,42 +356,36 @@ const BuildingsPage: React.FC = () => {
       }
     },
     [
-      buildingForm,
-      selectedBuilding,
-      updateBuilding,
-      createBuilding,
+      roomForm,
+      selectedRoom,
+      updateRoom,
+      createRoom,
       onEditClose,
       onCreateClose,
-      refreshBuildings,
-      refreshBuilding,
+      refreshRooms,
+      refreshRoom,
     ]
   );
 
   const handleDelete = useCallback(async () => {
-    if (!selectedBuilding) return;
+    if (!selectedRoom) return;
 
     try {
-      await deleteBuilding(selectedBuilding.id);
+      await deleteRoom(selectedRoom.id);
       setSuccessMessage(
-        `Building "${selectedBuilding.name}" has been deleted successfully.`
+        `Room "${selectedRoom.name}" has been deleted successfully.`
       );
       onDeleteClose();
       handleBackToList();
-      await refreshBuildings();
+      await refreshRooms();
     } catch (error) {
       console.error("Delete failed:", error);
       // Error is already handled by the mutation hook
     }
-  }, [
-    selectedBuilding,
-    deleteBuilding,
-    onDeleteClose,
-    handleBackToList,
-    refreshBuildings,
-  ]);
+  }, [selectedRoom, deleteRoom, onDeleteClose, handleBackToList, refreshRooms]);
 
   const resetForm = useCallback(() => {
-    setBuildingForm({
+    setRoomForm({
       name: "",
       code: "",
       areaSqm: 0,
@@ -407,20 +399,20 @@ const BuildingsPage: React.FC = () => {
   }, []);
 
   const prepareEditForm = useCallback(() => {
-    if (selectedBuilding) {
-      setBuildingForm({
-        name: selectedBuilding.name || "",
-        code: selectedBuilding.code || "",
-        areaSqm: selectedBuilding.areaSqm || 0,
-        floors: selectedBuilding.floors || 1,
-        yearBuilt: selectedBuilding.yearBuilt || new Date().getFullYear(),
-        buildingType: selectedBuilding.buildingType || "commercial",
-        description: selectedBuilding.description || "",
-        status: selectedBuilding.status || "active",
-        address: selectedBuilding.address || "",
+    if (selectedRoom) {
+      setRoomForm({
+        name: selectedRoom.name || "",
+        code: selectedRoom.code || "",
+        areaSqm: selectedRoom.areaSqm || 0,
+        floors: selectedRoom.floors || 1,
+        yearBuilt: selectedRoom.yearBuilt || new Date().getFullYear(),
+        buildingType: selectedRoom.buildingType || "commercial",
+        description: selectedRoom.description || "",
+        status: selectedRoom.status || "active",
+        address: selectedRoom.address || "",
       });
     }
-  }, [selectedBuilding]);
+  }, [selectedRoom]);
 
   // ✅ FIXED: Enhanced utility functions with proper null/undefined handling
   const safeFormat = {
@@ -515,21 +507,20 @@ const BuildingsPage: React.FC = () => {
 
   // ✅ FIXED: Summary statistics with better array handling
   const summaryStats = useMemo(() => {
-    // ✅ Ensure buildings is always an array
-    const buildingsArray = Array.isArray(buildings) ? buildings : [];
+    // ✅ Ensure rooms is always an array
+    const roomsArray = Array.isArray(rooms) ? rooms : [];
 
     return {
-      total: totalCount || buildingsArray.length,
-      active: buildingsArray.filter((b) => b.status === "active").length,
-      maintenance: buildingsArray.filter((b) => b.status === "maintenance")
-        .length,
-      totalArea: buildingsArray.reduce((sum, b) => sum + (b.areaSqm || 0), 0),
+      total: totalCount || roomsArray.length,
+      active: roomsArray.filter((r) => r.status === "active").length,
+      maintenance: roomsArray.filter((r) => r.status === "maintenance").length,
+      totalArea: roomsArray.reduce((sum, r) => sum + (r.areaSqm || 0), 0),
     };
-  }, [buildings, totalCount]);
+  }, [rooms, totalCount]);
 
   // ✅ FIXED: Details loading state properly checks all data types
   const detailsLoading =
-    buildingLoading ||
+    roomLoading ||
     equipmentLoading ||
     energyStatsLoading ||
     powerQualityLoading ||
@@ -548,7 +539,7 @@ const BuildingsPage: React.FC = () => {
               Authentication Required
             </h3>
             <p className="text-default-500 mb-4">
-              Please log in to access the buildings management page.
+              Please log in to access the rooms management page.
             </p>
           </CardBody>
         </Card>
@@ -557,21 +548,21 @@ const BuildingsPage: React.FC = () => {
   }
 
   // ✅ FIXED: Main error display with better error handling
-  if (buildingsIsError && buildings.length === 0 && !buildingsLoading) {
+  if (roomsIsError && rooms.length === 0 && !roomsLoading) {
     return (
       <div className="p-6">
         <Card>
           <CardBody className="text-center p-8">
             <AlertTriangle className="w-16 h-16 text-danger mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-foreground mb-2">
-              Error Loading Buildings
+              Error Loading Rooms
             </h3>
-            <p className="text-default-500 mb-4">{buildingsError}</p>
+            <p className="text-default-500 mb-4">{roomsError}</p>
             <Button
               color="primary"
-              onPress={refreshBuildings}
+              onPress={refreshRooms}
               startContent={<RefreshCw className="w-4 h-4" />}
-              isLoading={buildingsLoading}
+              isLoading={roomsLoading}
             >
               Retry
             </Button>
@@ -581,8 +572,8 @@ const BuildingsPage: React.FC = () => {
     );
   }
 
-  // ✅ Building Form Modal
-  const BuildingFormModal = () => (
+  // ✅ Room Form Modal
+  const RoomFormModal = () => (
     <Modal
       isOpen={isCreateOpen || isEditOpen}
       onClose={isEditOpen ? onEditClose : onCreateClose}
@@ -592,7 +583,7 @@ const BuildingsPage: React.FC = () => {
       <ModalContent>
         <ModalHeader>
           <h2 className="text-xl font-semibold">
-            {isEditOpen ? "Edit Building" : "Create Building"}
+            {isEditOpen ? "Edit Room" : "Create Room"}
           </h2>
         </ModalHeader>
         <ModalBody>
@@ -605,21 +596,21 @@ const BuildingsPage: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
-                label="Building Name"
-                placeholder="Enter building name"
-                value={buildingForm.name}
+                label="Room Name"
+                placeholder="Enter room name"
+                value={roomForm.name}
                 onValueChange={(value) =>
-                  setBuildingForm((prev) => ({ ...prev, name: value }))
+                  setRoomForm((prev) => ({ ...prev, name: value }))
                 }
                 isRequired
                 variant="bordered"
               />
               <Input
-                label="Building Code"
-                placeholder="Enter building code"
-                value={buildingForm.code}
+                label="Room Code"
+                placeholder="Enter room code"
+                value={roomForm.code}
                 onValueChange={(value) =>
-                  setBuildingForm((prev) => ({ ...prev, code: value }))
+                  setRoomForm((prev) => ({ ...prev, code: value }))
                 }
                 isRequired
                 variant="bordered"
@@ -628,9 +619,9 @@ const BuildingsPage: React.FC = () => {
                 label="Area (m²)"
                 type="number"
                 placeholder="Enter area in square meters"
-                value={buildingForm.areaSqm?.toString() || ""}
+                value={roomForm.areaSqm?.toString() || ""}
                 onValueChange={(value) =>
-                  setBuildingForm((prev) => ({
+                  setRoomForm((prev) => ({
                     ...prev,
                     areaSqm: Number(value) || 0,
                   }))
@@ -638,12 +629,12 @@ const BuildingsPage: React.FC = () => {
                 variant="bordered"
               />
               <Input
-                label="Floors"
+                label="Floor"
                 type="number"
-                placeholder="Number of floors"
-                value={buildingForm.floors?.toString() || ""}
+                placeholder="Floor"
+                value={roomForm.floors?.toString() || ""}
                 onValueChange={(value) =>
-                  setBuildingForm((prev) => ({
+                  setRoomForm((prev) => ({
                     ...prev,
                     floors: Number(value) || 1,
                   }))
@@ -653,10 +644,10 @@ const BuildingsPage: React.FC = () => {
               <Input
                 label="Year Built"
                 type="number"
-                placeholder="Year building was constructed"
-                value={buildingForm.yearBuilt?.toString() || ""}
+                placeholder="Year room was constructed"
+                value={roomForm.yearBuilt?.toString() || ""}
                 onValueChange={(value) =>
-                  setBuildingForm((prev) => ({
+                  setRoomForm((prev) => ({
                     ...prev,
                     yearBuilt: Number(value) || new Date().getFullYear(),
                   }))
@@ -664,10 +655,10 @@ const BuildingsPage: React.FC = () => {
                 variant="bordered"
               />
               <Select
-                label="Building Type"
-                selectedKeys={[buildingForm.buildingType]}
+                label="Room Type"
+                selectedKeys={[roomForm.buildingType]}
                 onSelectionChange={(keys) =>
-                  setBuildingForm((prev) => ({
+                  setRoomForm((prev) => ({
                     ...prev,
                     buildingType: Array.from(keys)[0] as any,
                   }))
@@ -681,9 +672,9 @@ const BuildingsPage: React.FC = () => {
               </Select>
               <Select
                 label="Status"
-                selectedKeys={[buildingForm.status]}
+                selectedKeys={[roomForm.status]}
                 onSelectionChange={(keys) =>
-                  setBuildingForm((prev) => ({
+                  setRoomForm((prev) => ({
                     ...prev,
                     status: Array.from(keys)[0] as any,
                   }))
@@ -696,10 +687,10 @@ const BuildingsPage: React.FC = () => {
               </Select>
               <Input
                 label="Address"
-                placeholder="Enter building address"
-                value={buildingForm.address}
+                placeholder="Enter room address"
+                value={roomForm.address}
                 onValueChange={(value) =>
-                  setBuildingForm((prev) => ({ ...prev, address: value }))
+                  setRoomForm((prev) => ({ ...prev, address: value }))
                 }
                 className="md:col-span-1"
                 variant="bordered"
@@ -707,10 +698,10 @@ const BuildingsPage: React.FC = () => {
             </div>
             <Input
               label="Description"
-              placeholder="Enter building description"
-              value={buildingForm.description}
+              placeholder="Enter room description"
+              value={roomForm.description}
               onValueChange={(value) =>
-                setBuildingForm((prev) => ({ ...prev, description: value }))
+                setRoomForm((prev) => ({ ...prev, description: value }))
               }
               variant="bordered"
             />
@@ -728,9 +719,9 @@ const BuildingsPage: React.FC = () => {
             color="primary"
             onPress={() => handleSubmit(isEditOpen)}
             isLoading={mutationLoading}
-            isDisabled={!buildingForm.name.trim() || !buildingForm.code.trim()}
+            isDisabled={!roomForm.name.trim() || !roomForm.code.trim()}
           >
-            {isEditOpen ? "Update" : "Create"} Building
+            {isEditOpen ? "Update" : "Create"} Room
           </Button>
         </ModalFooter>
       </ModalContent>
@@ -742,7 +733,7 @@ const BuildingsPage: React.FC = () => {
     <Modal isOpen={isDeleteOpen} onClose={onDeleteClose} size="lg">
       <ModalContent>
         <ModalHeader>
-          <h2 className="text-xl font-semibold text-danger">Delete Building</h2>
+          <h2 className="text-xl font-semibold text-danger">Delete Room</h2>
         </ModalHeader>
         <ModalBody>
           <div className="space-y-4">
@@ -753,7 +744,7 @@ const BuildingsPage: React.FC = () => {
                   This action cannot be undone
                 </p>
                 <p className="text-sm text-danger-600">
-                  All building data, equipment, and historical records will be
+                  All room data, equipment, and historical records will be
                   permanently deleted.
                 </p>
               </div>
@@ -768,20 +759,20 @@ const BuildingsPage: React.FC = () => {
               </div>
             )}
 
-            {selectedBuilding && (
+            {selectedRoom && (
               <div className="p-4 bg-default-100 rounded-lg">
-                <h4 className="font-medium mb-3">Building Information:</h4>
+                <h4 className="font-medium mb-3">Room Information:</h4>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-default-500">Name:</span>
                     <span className="ml-2 font-medium">
-                      {selectedBuilding.name}
+                      {selectedRoom.name}
                     </span>
                   </div>
                   <div>
                     <span className="text-default-500">Code:</span>
                     <span className="ml-2 font-medium">
-                      {selectedBuilding.code}
+                      {selectedRoom.code}
                     </span>
                   </div>
                 </div>
@@ -803,7 +794,7 @@ const BuildingsPage: React.FC = () => {
             isLoading={mutationLoading}
             startContent={<Trash2 className="w-4 h-4" />}
           >
-            Delete Building
+            Delete Room
           </Button>
         </ModalFooter>
       </ModalContent>
@@ -839,11 +830,11 @@ const BuildingsPage: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground-600 bg-clip-text text-transparent">
-              Buildings Management
+              Rooms Management
             </h1>
             <p className="text-default-500 mt-1">
-              Monitor and manage building infrastructure, energy consumption,
-              and compliance
+              Monitor and manage room infrastructure, energy consumption, and
+              compliance
             </p>
           </div>
 
@@ -854,13 +845,13 @@ const BuildingsPage: React.FC = () => {
               startContent={<Plus className="w-4 h-4" />}
               className="bg-gradient-to-r from-primary to-secondary"
             >
-              Add Building
+              Add Room
             </Button>
             <Button
               variant="bordered"
-              onPress={refreshBuildings}
+              onPress={refreshRooms}
               startContent={<RefreshCw className="w-4 h-4" />}
-              isLoading={buildingsLoading}
+              isLoading={roomsLoading}
             >
               Refresh
             </Button>
@@ -876,7 +867,7 @@ const BuildingsPage: React.FC = () => {
                   <Building className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm text-default-500">Total Buildings</p>
+                  <p className="text-sm text-default-500">Total Rooms</p>
                   <p className="text-xl font-semibold">{summaryStats.total}</p>
                 </div>
               </div>
@@ -890,7 +881,7 @@ const BuildingsPage: React.FC = () => {
                   <CheckCircle className="w-5 h-5 text-success" />
                 </div>
                 <div>
-                  <p className="text-sm text-default-500">Active Buildings</p>
+                  <p className="text-sm text-default-500">Active Rooms</p>
                   <p className="text-xl font-semibold">{summaryStats.active}</p>
                 </div>
               </div>
@@ -935,7 +926,7 @@ const BuildingsPage: React.FC = () => {
           <CardBody>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <Input
-                placeholder="Search buildings..."
+                placeholder="Search rooms..."
                 value={searchQuery}
                 onValueChange={setSearchQuery}
                 startContent={<Search className="w-4 h-4 text-default-400" />}
@@ -959,7 +950,7 @@ const BuildingsPage: React.FC = () => {
               </Select>
 
               <Select
-                placeholder="Building Type"
+                placeholder="Room Type"
                 selectedKeys={typeFilter ? [typeFilter] : []}
                 onSelectionChange={(keys) =>
                   setTypeFilter((Array.from(keys)[0] as string) || "all")
@@ -1003,48 +994,47 @@ const BuildingsPage: React.FC = () => {
         </Card>
 
         {/* ✅ Loading State */}
-        {buildingsLoading && buildings.length === 0 && (
+        {roomsLoading && rooms.length === 0 && (
           <div className="flex items-center justify-center py-12">
             <div className="text-center space-y-4">
               <Spinner size="lg" color="primary" />
-              <p className="text-default-500">Loading buildings...</p>
+              <p className="text-default-500">Loading rooms...</p>
             </div>
           </div>
         )}
 
-        {/* ✅ FIXED: Buildings Grid with proper array handling */}
-        {Array.isArray(buildings) && buildings.length > 0 && (
+        {/* ✅ FIXED: Rooms Grid with proper array handling */}
+        {Array.isArray(rooms) && rooms.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {buildings.map((building) => (
+            {rooms.map((room) => (
               <Card
-                key={building.id}
+                key={room.id}
                 className="hover:shadow-lg transition-all duration-200 hover:scale-[1.02] bg-gradient-to-br from-background to-content1 border border-divider hover:border-primary/30"
                 isPressable
-                onPress={() => handleBuildingSelect(building)}
+                onPress={() => handleRoomSelect(room)}
               >
                 <CardHeader className="pb-3">
                   <div className="flex justify-between items-start w-full">
                     <div className="flex-1">
                       <h3 className="text-lg font-semibold text-foreground line-clamp-1">
-                        {building.name || "Unnamed Building"}
+                        {room.name || "Unnamed Room"}
                       </h3>
                       <p className="text-sm text-default-500 mt-1">
-                        {building.code || `ID: ${building.id}`}
+                        {room.code || `ID: ${room.id}`}
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      {building.status && renderStatusChip(building.status)}
-                      {building.buildingType &&
-                        renderTypeChip(building.buildingType)}
+                      {room.status && renderStatusChip(room.status)}
+                      {room.buildingType && renderTypeChip(room.buildingType)}
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardBody className="pt-0">
                   <div className="space-y-4">
-                    {building.description && (
+                    {room.description && (
                       <p className="text-sm text-default-600 line-clamp-2">
-                        {building.description}
+                        {room.description}
                       </p>
                     )}
 
@@ -1052,29 +1042,27 @@ const BuildingsPage: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <MapPin className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.areaSqm
-                            ? `${building.areaSqm.toLocaleString()} m²`
+                          {room.areaSqm
+                            ? `${room.areaSqm.toLocaleString()} m²`
                             : "N/A"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Building className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.floors
-                            ? `${building.floors} floors`
-                            : "N/A"}
+                          {room.floors ? `${room.floors} floors` : "N/A"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Wrench className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.equipmentCount || 0} equipment
+                          {room.equipmentCount || 0} equipment
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-default-400" />
                         <span className="text-default-600">
-                          {building.yearBuilt || "N/A"}
+                          {room.yearBuilt || "N/A"}
                         </span>
                       </div>
                     </div>
@@ -1083,34 +1071,32 @@ const BuildingsPage: React.FC = () => {
 
                     {/* ✅ Server-computed metrics */}
                     <div className="space-y-3">
-                      {building.avgComplianceScore !== null &&
-                        building.avgComplianceScore !== undefined && (
+                      {room.avgComplianceScore !== null &&
+                        room.avgComplianceScore !== undefined && (
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-default-600 flex items-center gap-2">
                               <Shield className="w-4 h-4" />
                               Compliance
                             </span>
-                            {renderEfficiencyRating(
-                              building.avgComplianceScore
-                            )}
+                            {renderEfficiencyRating(room.avgComplianceScore)}
                           </div>
                         )}
 
-                      {building.avgPowerFactor !== null &&
-                        building.avgPowerFactor !== undefined && (
+                      {room.avgPowerFactor !== null &&
+                        room.avgPowerFactor !== undefined && (
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-default-600 flex items-center gap-2">
                               <Zap className="w-4 h-4" />
                               Power Factor
                             </span>
                             <span className="text-sm font-medium">
-                              {safeFormat.number(building.avgPowerFactor, 2)}
+                              {safeFormat.number(room.avgPowerFactor, 2)}
                             </span>
                           </div>
                         )}
 
-                      {building.totalConsumptionKwh !== null &&
-                        building.totalConsumptionKwh !== undefined && (
+                      {room.totalConsumptionKwh !== null &&
+                        room.totalConsumptionKwh !== undefined && (
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-default-600 flex items-center gap-2">
                               <Activity className="w-4 h-4" />
@@ -1118,7 +1104,7 @@ const BuildingsPage: React.FC = () => {
                             </span>
                             <span className="text-sm font-medium">
                               {safeFormat
-                                .getValue(building.totalConsumptionKwh, 0)
+                                .getValue(room.totalConsumptionKwh, 0)
                                 .toLocaleString()}
                             </span>
                           </div>
@@ -1139,7 +1125,7 @@ const BuildingsPage: React.FC = () => {
                       color="primary"
                       startContent={<Eye className="w-3 h-3" />}
                       className="flex-1"
-                      onPress={() => handleBuildingSelect(building)}
+                      onPress={() => handleRoomSelect(room)}
                     >
                       View Details
                     </Button>
@@ -1148,7 +1134,7 @@ const BuildingsPage: React.FC = () => {
                       variant="bordered"
                       isIconOnly
                       onPress={() => {
-                        setSelectedBuildingId(building.id);
+                        setSelectedRoomId(room.id);
                         handleEditOpen();
                       }}
                     >
@@ -1162,48 +1148,47 @@ const BuildingsPage: React.FC = () => {
         )}
 
         {/* ✅ FIXED: Empty State with proper array check */}
-        {(!Array.isArray(buildings) || buildings.length === 0) &&
-          !buildingsLoading && (
-            <Card>
-              <CardBody className="text-center p-12">
-                <Building className="w-16 h-16 text-default-300 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-foreground mb-2">
-                  {searchQuery || statusFilter !== "all" || typeFilter !== "all"
-                    ? "No Buildings Found"
-                    : "No Buildings Yet"}
-                </h3>
-                <p className="text-default-500 mb-6">
-                  {searchQuery || statusFilter !== "all" || typeFilter !== "all"
-                    ? "Try adjusting your filters to see more results"
-                    : "Get started by adding your first building"}
-                </p>
-                <div className="flex gap-3 justify-center">
-                  {searchQuery ||
-                  statusFilter !== "all" ||
-                  typeFilter !== "all" ? (
-                    <Button
-                      variant="bordered"
-                      onPress={() => {
-                        setSearchQuery("");
-                        setStatusFilter("all");
-                        setTypeFilter("all");
-                      }}
-                    >
-                      Clear Filters
-                    </Button>
-                  ) : (
-                    <Button
-                      color="primary"
-                      onPress={handleCreateOpen}
-                      startContent={<Plus className="w-4 h-4" />}
-                    >
-                      Add First Building
-                    </Button>
-                  )}
-                </div>
-              </CardBody>
-            </Card>
-          )}
+        {(!Array.isArray(rooms) || rooms.length === 0) && !roomsLoading && (
+          <Card>
+            <CardBody className="text-center p-12">
+              <Building className="w-16 h-16 text-default-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-foreground mb-2">
+                {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                  ? "No Rooms Found"
+                  : "No Rooms Yet"}
+              </h3>
+              <p className="text-default-500 mb-6">
+                {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                  ? "Try adjusting your filters to see more results"
+                  : "Get started by adding your first room"}
+              </p>
+              <div className="flex gap-3 justify-center">
+                {searchQuery ||
+                statusFilter !== "all" ||
+                typeFilter !== "all" ? (
+                  <Button
+                    variant="bordered"
+                    onPress={() => {
+                      setSearchQuery("");
+                      setStatusFilter("all");
+                      setTypeFilter("all");
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                ) : (
+                  <Button
+                    color="primary"
+                    onPress={handleCreateOpen}
+                    startContent={<Plus className="w-4 h-4" />}
+                  >
+                    Add First Room
+                  </Button>
+                )}
+              </div>
+            </CardBody>
+          </Card>
+        )}
 
         {/* ✅ Pagination */}
         {totalPages > 1 && (
@@ -1220,7 +1205,7 @@ const BuildingsPage: React.FC = () => {
         )}
 
         {/* ✅ Modals */}
-        <BuildingFormModal />
+        <RoomFormModal />
         <DeleteConfirmationModal />
       </div>
     );
@@ -1258,15 +1243,15 @@ const BuildingsPage: React.FC = () => {
             onPress={handleBackToList}
             startContent={<ChevronRight className="w-4 h-4 rotate-180" />}
           >
-            Back to Buildings
+            Back to Rooms
           </Button>
           <div>
             <h1 className="text-2xl font-bold text-foreground">
-              {selectedBuilding?.name || "Building Details"}
+              {selectedRoom?.name || "Room Details"}
             </h1>
             <p className="text-default-500">
-              {selectedBuilding?.code} •{" "}
-              {selectedBuilding?.buildingType?.replace("_", " ")}
+              {selectedRoom?.code} •{" "}
+              {selectedRoom?.buildingType?.replace("_", " ")}
             </p>
           </div>
         </div>
@@ -1275,11 +1260,11 @@ const BuildingsPage: React.FC = () => {
           <Button
             variant="bordered"
             onPress={() => {
-              refreshBuilding();
-              refreshBuildings();
+              refreshRoom();
+              refreshRooms();
             }}
             startContent={<RefreshCw className="w-4 h-4" />}
-            isLoading={buildingLoading}
+            isLoading={roomLoading}
           >
             Refresh
           </Button>
@@ -1297,7 +1282,7 @@ const BuildingsPage: React.FC = () => {
                 startContent={<Edit className="w-4 h-4" />}
                 onPress={handleEditOpen}
               >
-                Edit Building
+                Edit Room
               </DropdownItem>
               <DropdownItem
                 key="delete"
@@ -1306,7 +1291,7 @@ const BuildingsPage: React.FC = () => {
                 color="danger"
                 onPress={onDeleteOpen}
               >
-                Delete Building
+                Delete Room
               </DropdownItem>
             </DropdownMenu>
           </Dropdown>
@@ -1326,8 +1311,8 @@ const BuildingsPage: React.FC = () => {
                 <p className="text-xl font-semibold">
                   {equipmentIsError
                     ? "Error"
-                    : Array.isArray(buildingEquipment)
-                      ? buildingEquipment.length
+                    : Array.isArray(roomEquipment)
+                      ? roomEquipment.length
                       : 0}
                 </p>
                 {equipmentLoading && <Spinner size="sm" />}
@@ -1347,8 +1332,8 @@ const BuildingsPage: React.FC = () => {
                 <p className="text-xl font-semibold">
                   {auditsIsError
                     ? "Error"
-                    : Array.isArray(buildingAudits)
-                      ? buildingAudits.length
+                    : Array.isArray(roomAudits)
+                      ? roomAudits.length
                       : 0}
                 </p>
                 {auditsLoading && <Spinner size="sm" />}
@@ -1368,9 +1353,8 @@ const BuildingsPage: React.FC = () => {
                 <p className="text-xl font-semibold">
                   {alertsIsError
                     ? "Error"
-                    : Array.isArray(buildingAlerts)
-                      ? buildingAlerts.filter((a) => a.status === "active")
-                          .length
+                    : Array.isArray(roomAlerts)
+                      ? roomAlerts.filter((a) => a.status === "active").length
                       : 0}
                 </p>
                 {alertsLoading && <Spinner size="sm" />}
@@ -1429,35 +1413,33 @@ const BuildingsPage: React.FC = () => {
               </div>
             ) : (
               <>
-                {/* ✅ Building Information */}
+                {/* ✅ Room Information */}
                 <Card>
                   <CardHeader>
-                    <h3 className="text-lg font-semibold">
-                      Building Information
-                    </h3>
+                    <h3 className="text-lg font-semibold">Room Information</h3>
                   </CardHeader>
                   <CardBody>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       <div>
                         <p className="text-sm text-default-500 mb-1">
-                          Building Name
+                          Room Name
                         </p>
                         <p className="font-medium">
-                          {selectedBuilding?.name || "N/A"}
+                          {selectedRoom?.name || "N/A"}
                         </p>
                       </div>
                       <div>
                         <p className="text-sm text-default-500 mb-1">
-                          Building Code
+                          Room Code
                         </p>
                         <p className="font-medium">
-                          {selectedBuilding?.code || "N/A"}
+                          {selectedRoom?.code || "N/A"}
                         </p>
                       </div>
                       <div>
                         <p className="text-sm text-default-500 mb-1">Status</p>
-                        {selectedBuilding?.status ? (
-                          renderStatusChip(selectedBuilding.status)
+                        {selectedRoom?.status ? (
+                          renderStatusChip(selectedRoom.status)
                         ) : (
                           <span className="text-default-400">N/A</span>
                         )}
@@ -1465,15 +1447,15 @@ const BuildingsPage: React.FC = () => {
                       <div>
                         <p className="text-sm text-default-500 mb-1">Area</p>
                         <p className="font-medium">
-                          {selectedBuilding?.areaSqm
-                            ? `${selectedBuilding.areaSqm.toLocaleString()} m²`
+                          {selectedRoom?.areaSqm
+                            ? `${selectedRoom.areaSqm.toLocaleString()} m²`
                             : "N/A"}
                         </p>
                       </div>
                       <div>
                         <p className="text-sm text-default-500 mb-1">Floors</p>
                         <p className="font-medium">
-                          {selectedBuilding?.floors || "N/A"}
+                          {selectedRoom?.floors || "N/A"}
                         </p>
                       </div>
                       <div>
@@ -1481,27 +1463,27 @@ const BuildingsPage: React.FC = () => {
                           Year Built
                         </p>
                         <p className="font-medium">
-                          {selectedBuilding?.yearBuilt || "N/A"}
+                          {selectedRoom?.yearBuilt || "N/A"}
                         </p>
                       </div>
                     </div>
 
-                    {selectedBuilding?.description && (
+                    {selectedRoom?.description && (
                       <div className="mt-6">
                         <p className="text-sm text-default-500 mb-2">
                           Description
                         </p>
                         <p className="text-default-700">
-                          {selectedBuilding.description}
+                          {selectedRoom.description}
                         </p>
                       </div>
                     )}
 
-                    {selectedBuilding?.address && (
+                    {selectedRoom?.address && (
                       <div className="mt-4">
                         <p className="text-sm text-default-500 mb-2">Address</p>
                         <p className="text-default-700">
-                          {selectedBuilding.address}
+                          {selectedRoom.address}
                         </p>
                       </div>
                     )}
@@ -1624,7 +1606,7 @@ const BuildingsPage: React.FC = () => {
                       </p>
                       <Button
                         variant="bordered"
-                        onPress={refreshBuilding}
+                        onPress={refreshRoom}
                         startContent={<RefreshCw className="w-4 h-4" />}
                         isLoading={energyStatsLoading}
                       >
@@ -1644,12 +1626,11 @@ const BuildingsPage: React.FC = () => {
             <div className="flex items-center space-x-2">
               <Wrench className="w-4 h-4" />
               <span>Equipment</span>
-              {Array.isArray(buildingEquipment) &&
-                buildingEquipment.length > 0 && (
-                  <Chip size="sm" color="primary" variant="flat">
-                    {buildingEquipment.length}
-                  </Chip>
-                )}
+              {Array.isArray(roomEquipment) && roomEquipment.length > 0 && (
+                <Chip size="sm" color="primary" variant="flat">
+                  {roomEquipment.length}
+                </Chip>
+              )}
             </div>
           }
         >
@@ -1670,15 +1651,14 @@ const BuildingsPage: React.FC = () => {
                   </p>
                   <Button
                     variant="bordered"
-                    onPress={refreshBuilding}
+                    onPress={refreshRoom}
                     startContent={<RefreshCw className="w-4 h-4" />}
                   >
                     Retry
                   </Button>
                 </CardBody>
               </Card>
-            ) : Array.isArray(buildingEquipment) &&
-              buildingEquipment.length > 0 ? (
+            ) : Array.isArray(roomEquipment) && roomEquipment.length > 0 ? (
               <Card>
                 <CardBody>
                   <Table aria-label="Equipment table">
@@ -1691,7 +1671,7 @@ const BuildingsPage: React.FC = () => {
                       <TableColumn>ACTIONS</TableColumn>
                     </TableHeader>
                     <TableBody>
-                      {buildingEquipment.map((equipment: Equipment) => (
+                      {roomEquipment.map((equipment: Equipment) => (
                         <TableRow key={equipment.id}>
                           <TableCell>
                             <div>
@@ -1795,7 +1775,7 @@ const BuildingsPage: React.FC = () => {
                     No Equipment Found
                   </h3>
                   <p className="text-default-500">
-                    This building doesn't have any equipment registered yet.
+                    This room doesn't have any equipment registered yet.
                   </p>
                 </CardBody>
               </Card>
@@ -1805,10 +1785,10 @@ const BuildingsPage: React.FC = () => {
       </Tabs>
 
       {/* ✅ Modals */}
-      <BuildingFormModal />
+      <RoomFormModal />
       <DeleteConfirmationModal />
     </div>
   );
 };
 
-export default BuildingsPage;
+export default RoomsPage;
